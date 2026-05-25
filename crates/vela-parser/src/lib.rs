@@ -16,8 +16,15 @@ pub enum Stmt {
     TypeDecl(TypeDecl),
     TraitDecl(TraitDecl),
     Impl(ImplBlock),
+    Tests(Vec<TestCase>),
     Import { path: Vec<String>, kind: ImportKind, public: bool },
     Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TestCase {
+    Test { name: String, body: Expr },
+    Prop { name: String, params: Vec<Param>, guard: Option<Expr>, body: Expr },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -341,6 +348,12 @@ impl Parser {
                 }
             }
             Some(TokenKind::Keyword(Keyword::Import)) => self.parse_import(false),
+            Some(TokenKind::Keyword(Keyword::Tests)) => {
+                self.bump();
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let cases = self.parse_test_cases()?;
+                Ok(Stmt::Tests(cases))
+            }
             Some(TokenKind::Keyword(Keyword::Trait)) => {
                 self.bump();
                 let name = self.expect_ident()?;
@@ -384,6 +397,76 @@ impl Parser {
                     Ok(Stmt::Expr(expr))
                 }
             }
+        }
+    }
+
+    fn parse_test_cases(&mut self) -> Result<Vec<TestCase>, ParseError> {
+        self.skip_newlines();
+        let dedent_pending = matches!(self.peek(), Some(TokenKind::Indent));
+        if dedent_pending {
+            self.bump();
+            self.skip_newlines();
+        }
+        let mut cases = Vec::new();
+        loop {
+            match self.peek() {
+                Some(TokenKind::Keyword(Keyword::Test)) => {
+                    self.bump();
+                    let name = self.expect_string()?;
+                    self.expect(&TokenKind::Op(Op::Assign))?;
+                    let body = self.parse_body_after_block_intro()?;
+                    cases.push(TestCase::Test { name, body });
+                }
+                Some(TokenKind::Keyword(Keyword::Prop)) => {
+                    self.bump();
+                    let name = self.expect_string()?;
+                    let mut params = Vec::new();
+                    loop {
+                        match self.peek() {
+                            Some(TokenKind::Ident(_)) => {
+                                let n = self.expect_ident()?;
+                                params.push(Param { name: n, ty: None });
+                            }
+                            Some(TokenKind::Punct(Punct::LParen)) => {
+                                let save = self.pos;
+                                self.bump();
+                                if let Some(p) = self.try_typed_param() {
+                                    params.push(p);
+                                } else {
+                                    self.pos = save;
+                                    break;
+                                }
+                            }
+                            _ => break,
+                        }
+                    }
+                    let guard = if matches!(self.peek(), Some(TokenKind::Keyword(Keyword::When))) {
+                        self.bump();
+                        Some(self.parse_expr_bp(0)?)
+                    } else {
+                        None
+                    };
+                    self.expect(&TokenKind::Op(Op::Assign))?;
+                    let body = self.parse_body_after_block_intro()?;
+                    cases.push(TestCase::Prop { name, params, guard, body });
+                }
+                _ => break,
+            }
+            self.skip_newlines();
+        }
+        if dedent_pending && matches!(self.peek(), Some(TokenKind::Dedent)) {
+            self.bump();
+        }
+        Ok(cases)
+    }
+
+    fn expect_string(&mut self) -> Result<String, ParseError> {
+        match self.bump() {
+            Some(TokenKind::Str(s)) => Ok(s),
+            Some(other) => {
+                Err(ParseError::new(format!("expected string literal, found {other:?}")))
+            }
+            None => Err(ParseError::new("expected string literal, found end of input")),
         }
     }
 
