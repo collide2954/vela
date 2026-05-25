@@ -32,6 +32,7 @@ pub enum Expr {
     Tuple(Vec<Expr>),
     DataFrameLit(Vec<(String, Expr)>),
     ArrayLit(Vec<Vec<Expr>>),
+    Sym(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -429,6 +430,7 @@ impl Parser {
             TokenKind::Str(s) => Ok(Expr::Lit(Lit::Str(s))),
             TokenKind::Bool(b) => Ok(Expr::Lit(Lit::Bool(b))),
             TokenKind::Ident(name) => Ok(Expr::Var(name)),
+            TokenKind::Sym(name) => Ok(Expr::Sym(name)),
             TokenKind::Keyword(Keyword::Fn) => {
                 let mut params = Vec::new();
                 while let Some(TokenKind::Ident(_)) = self.peek() {
