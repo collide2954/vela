@@ -407,6 +407,86 @@ pub fn check_program(src: &str) -> Result<Type, TypeError> {
 
 fn prelude(ctx: &mut Ctx) -> Env {
     let mut env = Env::new();
+
+    let series_of = |t: Type| Type::Series(Box::new(t));
+    let fn_of = |a: Type, b: Type| Type::Fn(Box::new(a), Box::new(b));
+
+    // length : [a] -> Int
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "length".into(),
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(series_of(Type::Var(a)), Type::Int),
+            },
+        );
+    }
+    // map : (a -> b) -> [a] -> [b]
+    {
+        let a = ctx.fresh_id();
+        let b = ctx.fresh_id();
+        env = env.extend(
+            "map".into(),
+            Scheme {
+                vars: vec![a, b],
+                ty: fn_of(
+                    fn_of(Type::Var(a), Type::Var(b)),
+                    fn_of(series_of(Type::Var(a)), series_of(Type::Var(b))),
+                ),
+            },
+        );
+    }
+    // filter : (a -> Bool) -> [a] -> [a]
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "filter".into(),
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(
+                    fn_of(Type::Var(a), Type::Bool),
+                    fn_of(series_of(Type::Var(a)), series_of(Type::Var(a))),
+                ),
+            },
+        );
+    }
+    // sum : [Int] -> Int
+    env = env.extend(
+        "sum".into(),
+        Scheme { vars: Vec::new(), ty: fn_of(series_of(Type::Int), Type::Int) },
+    );
+    // println : a -> ()
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "println".into(),
+            Scheme { vars: vec![a], ty: fn_of(Type::Var(a), Type::Unit) },
+        );
+    }
+    // print : a -> ()
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "print".into(),
+            Scheme { vars: vec![a], ty: fn_of(Type::Var(a), Type::Unit) },
+        );
+    }
+    // read_file : String -> Result<String, IoError>
+    env = env.extend(
+        "read_file".into(),
+        Scheme {
+            vars: Vec::new(),
+            ty: fn_of(
+                Type::String,
+                Type::Result(
+                    Box::new(Type::String),
+                    Box::new(Type::Named("IoError".into(), Vec::new())),
+                ),
+            ),
+        },
+    );
+
     {
         let a = ctx.fresh_id();
         env = env.extend(
