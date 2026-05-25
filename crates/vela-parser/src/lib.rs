@@ -9,6 +9,7 @@ pub enum Expr {
     BinOp(BinOp, Box<Expr>, Box<Expr>),
     UnaryOp(UnOp, Box<Expr>),
     Postfix(PostOp, Box<Expr>),
+    App(Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -124,6 +125,11 @@ impl Parser {
                 lhs = Expr::Postfix(op, Box::new(lhs));
                 continue;
             }
+            if self.peek().is_some_and(starts_atom) && APP_BP >= min_bp {
+                let rhs = self.parse_expr_bp(APP_BP + 1)?;
+                lhs = Expr::App(Box::new(lhs), Box::new(rhs));
+                continue;
+            }
             let Some((op, l_bp, r_bp)) = self.peek().and_then(binary_op) else { break };
             if l_bp < min_bp {
                 break;
@@ -155,6 +161,26 @@ impl Parser {
             other => Err(ParseError::new(format!("unexpected token: {other:?}"))),
         }
     }
+}
+
+const APP_BP: u8 = 25;
+
+fn starts_atom(tok: &TokenKind) -> bool {
+    matches!(
+        tok,
+        TokenKind::Int(_)
+            | TokenKind::UInt(_)
+            | TokenKind::BigInt(_)
+            | TokenKind::Float(_)
+            | TokenKind::Decimal(_)
+            | TokenKind::Str(_)
+            | TokenKind::Bool(_)
+            | TokenKind::Ident(_)
+            | TokenKind::Sym(_)
+            | TokenKind::Punct(
+                Punct::LParen | Punct::LBracket | Punct::LBrace | Punct::ArrayOpen | Punct::FrameOpen,
+            )
+    )
 }
 
 fn prefix_op(tok: &TokenKind) -> Option<(UnOp, u8)> {
