@@ -732,6 +732,7 @@ impl Parser {
             TokenKind::Keyword(Keyword::Match) => {
                 let scrut = self.parse_expr_bp(0)?;
                 self.expect(&TokenKind::Keyword(Keyword::With))?;
+                self.skip_newlines();
                 let mut arms = Vec::new();
                 while matches!(self.peek(), Some(TokenKind::Punct(Punct::Bar))) {
                     self.bump();
@@ -739,6 +740,7 @@ impl Parser {
                     self.expect(&TokenKind::Op(Op::RArrow))?;
                     let body = self.parse_expr_bp(0)?;
                     arms.push(MatchArm { pat, body });
+                    self.skip_newlines();
                 }
                 if arms.is_empty() {
                     return Err(ParseError::new("match expression has no arms"));
