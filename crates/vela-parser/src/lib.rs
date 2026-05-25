@@ -13,6 +13,7 @@ pub enum Stmt {
     Var { name: String, ty: Option<Ty>, body: Expr },
     Mutate { name: String, body: Expr },
     For { binding: String, iter: Expr, body: Expr },
+    Destructure { pat: Pat, body: Expr },
     TypeDecl(TypeDecl),
     TraitDecl(TraitDecl),
     Impl(ImplBlock),
@@ -292,6 +293,17 @@ impl Parser {
         match self.peek() {
             Some(TokenKind::Keyword(Keyword::Let)) => {
                 self.bump();
+                if matches!(
+                    self.peek(),
+                    Some(TokenKind::Punct(
+                        Punct::LParen | Punct::LBrace | Punct::LBracket,
+                    ))
+                ) {
+                    let pat = self.parse_pat()?;
+                    self.expect(&TokenKind::Op(Op::Assign))?;
+                    let body = self.parse_body_after_block_intro()?;
+                    return Ok(Stmt::Destructure { pat, body });
+                }
                 let name = self.expect_ident()?;
                 let mut params = Vec::new();
                 loop {

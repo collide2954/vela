@@ -644,6 +644,16 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             ctx.unify(&body_ty, &Type::Unit)?;
             Ok(Type::Unit)
         }
+        Stmt::Destructure { pat, body } => {
+            let body_ty = infer(body, env, ctx)?;
+            let (pat_ty, bindings) = infer_pat(pat, env, ctx)?;
+            ctx.unify(&body_ty, &pat_ty)?;
+            for (n, t) in bindings {
+                let resolved = ctx.resolve(&t);
+                *env = env.extend(n, Scheme::mono(resolved));
+            }
+            Ok(Type::Unit)
+        }
         Stmt::Expr(e) => infer(e, env, ctx),
         Stmt::TraitDecl(_)
         | Stmt::Impl(_)
