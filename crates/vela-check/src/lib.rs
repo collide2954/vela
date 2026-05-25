@@ -722,8 +722,14 @@ fn infer_binary(
                 ))),
             }
         }
-        BinOp::Pipe | BinOp::Tilde => Err(TypeError::new(format!(
-            "`{op:?}` typing not yet implemented"
-        ))),
+        BinOp::Pipe => {
+            let result = ctx.fresh_var();
+            let expected = Type::Fn(Box::new(l), Box::new(result.clone()));
+            ctx.unify(&r, &expected)?;
+            Ok(ctx.resolve(&result))
+        }
+        BinOp::Tilde => Err(TypeError::new(
+            "`~` (formula) typing requires DataFrame context; not yet implemented",
+        )),
     }
 }
