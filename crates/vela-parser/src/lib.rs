@@ -965,15 +965,15 @@ impl Parser {
     }
 
     fn parse_pat(&mut self) -> Result<Pat, ParseError> {
-        if let Some(TokenKind::Ident(name)) = self.peek() {
-            if name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
-                let name = self.expect_ident()?;
-                let mut args = Vec::new();
-                while self.peek().is_some_and(starts_pat_atom) {
-                    args.push(self.parse_pat_atom()?);
-                }
-                return Ok(Pat::Cons(name, args));
+        if let Some(TokenKind::Ident(name)) = self.peek()
+            && name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        {
+            let name = self.expect_ident()?;
+            let mut args = Vec::new();
+            while self.peek().is_some_and(starts_pat_atom) {
+                args.push(self.parse_pat_atom()?);
             }
+            return Ok(Pat::Cons(name, args));
         }
         let lo = self.parse_pat_atom()?;
         if matches!(self.peek(), Some(TokenKind::Op(Op::DotDotEq))) {
@@ -1261,10 +1261,11 @@ fn starts_type_atom(tok: &TokenKind) -> bool {
 }
 
 fn flatten_block(mut stmts: Vec<Stmt>) -> Expr {
-    if stmts.len() == 1 && matches!(stmts[0], Stmt::Expr(_)) {
-        if let Some(Stmt::Expr(e)) = stmts.pop() {
-            return e;
-        }
+    if stmts.len() == 1
+        && matches!(stmts[0], Stmt::Expr(_))
+        && let Some(Stmt::Expr(e)) = stmts.pop()
+    {
+        return e;
     }
     let trailing = if matches!(stmts.last(), Some(Stmt::Expr(_))) {
         if let Some(Stmt::Expr(e)) = stmts.pop() {
