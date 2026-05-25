@@ -9,3 +9,10 @@ version = "0.1.0"
 [[package]]
 name = "vela-lexer"
 version = "0.1.0"
+
+[[package]]
+name = "vela-parser"
+version = "0.1.0"
+dependencies = [
+ "vela-lexer",
+]
