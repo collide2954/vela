@@ -1,6 +1,6 @@
 # The Vela Language Specification
 
-Status: draft, version 0.3.
+Status: draft, version 0.4.
 Target: Vela 1.0.
 License: Apache-2.0.
 
@@ -116,6 +116,12 @@ bound to a name, the name has a concrete type; `let n = 1` gives
 `n : Int`, and `n + 1.0` is a type error. Suffixed literals never
 overflow at parse time; `10n ^ 100` is well-formed and exact.
 
+When an arithmetic expression leaves operand types unconstrained
+(for example `fn x y -> x + y`), the inferred type defaults to
+`Int`. Vela does not have numeric polymorphism via a type class; a
+function meant to work on multiple numeric types must annotate its
+parameters or be written with explicit conversions.
+
 String literals are double-quoted and support the usual escapes:
 
     "hello"
@@ -137,7 +143,9 @@ Reserved words: `let`, `var`, `fn`, `if`, `then`, `else`, `match`,
 ## 5. Syntax
 
 Vela is expression-oriented. Every construct produces a value; blocks
-return the value of their last expression.
+return the value of their last expression. A block whose final
+statement is not an expression (for example, ends in `let` or
+`for`) evaluates to `()`.
 
 ### 5.1 Bindings
 
@@ -384,6 +392,11 @@ Dispatch is closed within a module unless the function is declared
 subject to the coherence rule: at most one most-specific
 implementation must exist for any concrete call.
 
+In version 1.0 multiple dispatch is supported only inside `trait`
+and `impl` blocks (section 6.2). Free functions are single-dispatch:
+a name binds to at most one definition in a given scope. Free-
+function multi-dispatch is a planned 1.x feature.
+
 ### 6.2 Traits
 
 Traits group related operations and are dispatched the same way as
@@ -399,7 +412,13 @@ dispatch.
 There is no inheritance. Trait constraints appear in `where`
 clauses:
 
-    let print_all xs where Show t = xs |> each (fn x -> println (show x))
+    let print_all (xs : [t]) where Show t =
+        xs |> each (fn x -> println (show x))
+
+A `where` clause introduces a constraint that the type checker
+records as part of the function's inferred type. At each call site
+the checker verifies that the concrete type substituted for the
+constrained variable has the required `impl`.
 
 ### 6.3 Option and Result
 
@@ -412,8 +431,10 @@ short-circuits a `Result`:
         let df  = parse_csv raw?
         Ok df
 
-`?` requires the enclosing function to return a compatible
-`Result`.
+`?` requires the enclosing function to return a `Result`, and the
+error type of the operand must unify with the error type of the
+enclosing function's return type. The checker tracks this expected
+return type through the body of every function definition.
 
 ### 6.4 No exceptions, no panics in user code
 
@@ -441,6 +462,12 @@ constructor that takes positional or record arguments. A `type` with
 a single record body is a nominal record (distinct from structural
 records of the same shape). A `type` with a single named
 constructor wrapping one value is the idiomatic newtype.
+
+Each constructor is exposed in the enclosing module's value scope as
+a function from its arguments to the declared type. A nullary
+constructor (`Leaf`) is a value of that type; a constructor with
+arguments (`Circle Float`) is a function (`Float -> Shape`). Pattern
+matching uses the same constructors.
 
 Parametric types are written with type-variable parameters:
 
