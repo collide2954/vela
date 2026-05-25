@@ -275,11 +275,7 @@ impl<'a> Lexer<'a> {
             ) => self.paren_depth += 1,
             TokenKind::Punct(
                 Punct::RParen | Punct::RBracket | Punct::RBrace | Punct::ArrayClose | Punct::FrameClose,
-            ) => {
-                if self.paren_depth > 0 {
-                    self.paren_depth -= 1;
-                }
-            }
+            ) if self.paren_depth > 0 => self.paren_depth -= 1,
             _ => {}
         }
     }
