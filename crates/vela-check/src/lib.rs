@@ -1,7 +1,7 @@
 //! Type checking and inference for the Vela language.
 
 use std::collections::HashMap;
-use vela_parser::{BinOp, Expr, Lit, Pat, Stmt, UnOp, parse_expr, parse_program};
+use vela_parser::{BinOp, Expr, Lit, Pat, PostOp, Stmt, UnOp, parse_expr, parse_program};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -393,6 +393,14 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             Ok(ctx.instantiate(&scheme))
         }
         Expr::UnaryOp(op, inner) => infer_unary(*op, inner, env, ctx),
+        Expr::Postfix(PostOp::Question, inner) => {
+            let t = infer(inner, env, ctx)?;
+            let a = ctx.fresh_var();
+            let e = ctx.fresh_var();
+            let expected = Type::Result(Box::new(a.clone()), Box::new(e));
+            ctx.unify(&t, &expected)?;
+            Ok(ctx.resolve(&a))
+        }
         Expr::BinOp(op, lhs, rhs) => infer_binary(*op, lhs, rhs, env, ctx),
         Expr::Lambda(params, body) => {
             let params: Vec<vela_parser::Param> = params
