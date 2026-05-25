@@ -1,1 +1,6 @@
 /target
+**/*.rs.bk
+.DS_Store
+.vela/
+*.swp
+*.swo
