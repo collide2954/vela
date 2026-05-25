@@ -118,10 +118,21 @@ impl Env {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Ctx {
     subst: HashMap<u32, Type>,
     fresh: u32,
+    sums: HashMap<String, Vec<String>>,
+}
+
+impl Default for Ctx {
+    fn default() -> Self {
+        let mut sums = HashMap::new();
+        sums.insert("Bool".into(), vec!["true".into(), "false".into()]);
+        sums.insert("Option".into(), vec!["None".into(), "Some".into()]);
+        sums.insert("Result".into(), vec!["Ok".into(), "Err".into()]);
+        Self { subst: HashMap::new(), fresh: 0, sums }
+    }
 }
 
 impl Ctx {
@@ -492,7 +503,9 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             );
             match &decl.body {
                 TypeDeclBody::Sum(variants) => {
+                    let mut variant_names = Vec::with_capacity(variants.len());
                     for v in variants {
+                        variant_names.push(v.name.clone());
                         let mut ty = result_type.clone();
                         for arg in v.args.iter().rev() {
                             let arg_ty = translator.translate(arg, ctx)?;
@@ -501,6 +514,7 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                         let scheme = Scheme { vars: param_vars.clone(), ty };
                         *env = env.extend(v.name.clone(), scheme);
                     }
+                    ctx.sums.insert(decl.name.clone(), variant_names);
                 }
                 TypeDeclBody::Alias(_) => {}
             }
@@ -662,6 +676,7 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
                 let body_ty = infer(&arm.body, &arm_env, ctx)?;
                 ctx.unify(&result_ty, &body_ty)?;
             }
+            check_exhaustive(&s_ty, arms, ctx)?;
             Ok(ctx.resolve(&result_ty))
         }
         other => Err(TypeError::new(format!("cannot yet infer type of {other:?}"))),
@@ -782,6 +797,84 @@ fn collect_ftv(ty: &Type, ctx: &Ctx, out: &mut std::collections::BTreeSet<u32>) 
         Type::Named(_, args) => {
             for t in &args {
                 collect_ftv(t, ctx, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_exhaustive(
+    scrut_ty: &Type,
+    arms: &[vela_parser::MatchArm],
+    ctx: &Ctx,
+) -> Result<(), TypeError> {
+    let resolved = ctx.resolve(scrut_ty);
+    for arm in arms {
+        if arm.guard.is_none() && is_absorbing(&arm.pat) {
+            return Ok(());
+        }
+    }
+    let required: Vec<String> = match &resolved {
+        Type::Bool => vec!["true".into(), "false".into()],
+        Type::Option(_) => vec!["None".into(), "Some".into()],
+        Type::Result(_, _) => vec!["Ok".into(), "Err".into()],
+        Type::Named(name, _) => match ctx.sums.get(name) {
+            Some(vs) => vs.clone(),
+            None => {
+                return Err(TypeError::new(format!(
+                    "non-exhaustive match: type {name} has no known variants"
+                )));
+            }
+        },
+        other => {
+            return Err(TypeError::new(format!(
+                "non-exhaustive match on {} (requires a wildcard arm)",
+                other.show()
+            )));
+        }
+    };
+    let mut covered = std::collections::BTreeSet::new();
+    for arm in arms {
+        if arm.guard.is_some() {
+            continue;
+        }
+        collect_covered(&arm.pat, &mut covered);
+    }
+    let missing: Vec<&String> = required.iter().filter(|c| !covered.contains(*c)).collect();
+    if !missing.is_empty() {
+        let names: Vec<String> = missing.into_iter().cloned().collect();
+        return Err(TypeError::new(format!(
+            "non-exhaustive match - missing: {}",
+            names.join(", ")
+        )));
+    }
+    Ok(())
+}
+
+fn is_absorbing(pat: &Pat) -> bool {
+    match pat {
+        Pat::Wildcard | Pat::Var(_) => true,
+        Pat::As(inner, _) => is_absorbing(inner),
+        Pat::Or(alts) => alts.iter().any(is_absorbing),
+        _ => false,
+    }
+}
+
+fn collect_covered(pat: &Pat, out: &mut std::collections::BTreeSet<String>) {
+    match pat {
+        Pat::Lit(Lit::Bool(true)) => {
+            out.insert("true".into());
+        }
+        Pat::Lit(Lit::Bool(false)) => {
+            out.insert("false".into());
+        }
+        Pat::Cons(name, _) => {
+            out.insert(name.clone());
+        }
+        Pat::As(inner, _) => collect_covered(inner, out),
+        Pat::Or(alts) => {
+            for p in alts {
+                collect_covered(p, out);
             }
         }
         _ => {}
