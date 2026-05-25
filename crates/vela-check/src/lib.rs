@@ -1,5 +1,8 @@
 //! Type checking and inference for the Vela language.
 
+mod explain;
+pub use explain::explain;
+
 use std::collections::HashMap;
 use vela_parser::{
     BinOp, Expr, ListPart, Lit, Pat, PostOp, Stmt, TypeDeclBody, UnOp, parse_expr, parse_program,
@@ -81,11 +84,17 @@ impl Type {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TypeError {
     pub message: String,
+    pub code: &'static str,
 }
 
 impl TypeError {
     fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
+        Self { message: message.into(), code: "E0100" }
+    }
+
+    fn with_code(mut self, code: &'static str) -> Self {
+        self.code = code;
+        self
     }
 }
 
@@ -894,10 +903,9 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
         Expr::Lit(Lit::Bool(_)) => Ok(Type::Bool),
         Expr::Lit(Lit::Unit) => Ok(Type::Unit),
         Expr::Var(name) => {
-            let scheme = env
-                .lookup(name)
-                .cloned()
-                .ok_or_else(|| TypeError::new(format!("unbound name: {name}")))?;
+            let scheme = env.lookup(name).cloned().ok_or_else(|| {
+                TypeError::new(format!("unbound name: {name}")).with_code("E0110")
+            })?;
             Ok(ctx.instantiate(&scheme))
         }
         Expr::UnaryOp(op, inner) => infer_unary(*op, inner, env, ctx),
@@ -1032,7 +1040,7 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
                 let body_ty = infer(&arm.body, &arm_env, ctx)?;
                 ctx.unify(&result_ty, &body_ty)?;
             }
-            check_exhaustive(&s_ty, arms, ctx)?;
+            check_exhaustive(&s_ty, arms, ctx).map_err(|e| e.with_code("E0130"))?;
             Ok(ctx.resolve(&result_ty))
         }
         Expr::ArrayLit(rows) => {

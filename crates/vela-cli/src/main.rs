@@ -30,6 +30,22 @@ fn main() -> ExitCode {
             };
             check_one(path, &source)
         }
+        "explain" => {
+            let Some(code) = args.get(2) else {
+                eprintln!("usage: vela explain CODE");
+                return ExitCode::from(2);
+            };
+            match vela_check::explain(code) {
+                Some(text) => {
+                    println!("{text}");
+                    ExitCode::SUCCESS
+                }
+                None => {
+                    eprintln!("no explanation available for {code}");
+                    ExitCode::from(1)
+                }
+            }
+        }
         "--version" | "-V" => {
             println!("vela {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -45,7 +61,9 @@ fn check_one(path: &str, source: &str) -> ExitCode {
     match vela_parser::parse_program(source) {
         Ok(_) => {}
         Err(e) => {
-            let mut diag = Diagnostic::error(e.message).with_path(path);
+            let mut diag = Diagnostic::error(e.message)
+                .with_path(path)
+                .with_code(e.code);
             if let Some(span) = e.span {
                 diag = diag.with_span(span);
             }
@@ -59,7 +77,7 @@ fn check_one(path: &str, source: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            let diag = Diagnostic::error(e.message).with_path(path);
+            let diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
             eprint!("{}", diag.render(source));
             ExitCode::from(1)
         }

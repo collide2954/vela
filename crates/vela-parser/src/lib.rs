@@ -213,11 +213,12 @@ pub enum PostOp {
 pub struct ParseError {
     pub message: String,
     pub span: Option<Range<usize>>,
+    pub code: &'static str,
 }
 
 impl ParseError {
     fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into(), span: None }
+        Self { message: message.into(), span: None, code: "E0001" }
     }
 
     fn with_span(mut self, span: Span) -> Self {
