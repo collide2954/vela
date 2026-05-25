@@ -10,5 +10,8 @@ repository  = { workspace = true }
 name = "vela"
 path = "src/main.rs"
 
+[dependencies]
+vela-check = { path = "../vela-check" }
+
 [lints]
 workspace = true

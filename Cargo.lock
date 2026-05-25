@@ -13,6 +13,9 @@ dependencies = [
 [[package]]
 name = "vela-cli"
 version = "0.1.0"
+dependencies = [
+ "vela-check",
+]
 
 [[package]]
 name = "vela-lexer"
