@@ -8,10 +8,6 @@ fn opt(inner: Type) -> Type {
     Type::Option(Box::new(inner))
 }
 
-fn res(a: Type, e: Type) -> Type {
-    Type::Result(Box::new(a), Box::new(e))
-}
-
 #[test]
 fn some_of_int_is_option_int() {
     assert_eq!(t("Some 5"), opt(Type::Int));
