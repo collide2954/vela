@@ -1,4 +1,4 @@
-use vela_parser::{Expr, Lit, MatchArm, Pat, parse_expr};
+use vela_parser::{Expr, Lit, Pat, parse_expr};
 
 fn p(src: &str) -> Expr {
     parse_expr(src).expect("parses")
