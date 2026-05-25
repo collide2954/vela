@@ -15,7 +15,7 @@ fn lit(n: i64) -> Expr {
 fn simple_let_binding() {
     assert_eq!(
         s("let x = 1"),
-        Stmt::Let { name: "x".into(), params: vec![], body: lit(1) },
+        Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) },
     );
 }
 
@@ -26,6 +26,7 @@ fn let_binding_to_expression() {
         Stmt::Let {
             name: "total".into(),
             params: vec![],
+            return_ty: None,
             body: Expr::BinOp(BinOp::Add, Box::new(lit(1)), Box::new(lit(2))),
         },
     );
@@ -38,6 +39,7 @@ fn let_function_one_param() {
         Stmt::Let {
             name: "id".into(),
             params: vec!["x".into()],
+            return_ty: None,
             body: var("x"),
         },
     );
@@ -50,6 +52,7 @@ fn let_function_two_params() {
         Stmt::Let {
             name: "add".into(),
             params: vec!["x".into(), "y".into()],
+            return_ty: None,
             body: Expr::BinOp(BinOp::Add, Box::new(var("x")), Box::new(var("y"))),
         },
     );
@@ -64,6 +67,6 @@ fn bare_expression_is_a_statement() {
 fn var_binding() {
     assert_eq!(
         s("var counter = 0"),
-        Stmt::Var { name: "counter".into(), body: lit(0) },
+        Stmt::Var { name: "counter".into(), ty: None, body: lit(0) },
     );
 }

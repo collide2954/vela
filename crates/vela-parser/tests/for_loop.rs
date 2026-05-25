@@ -88,6 +88,6 @@ fn for_body_single_expression_unwraps() {
 fn let_still_works() {
     assert_eq!(
         s("let x = 1"),
-        Stmt::Let { name: "x".into(), params: vec![], body: lit(1) },
+        Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) },
     );
 }

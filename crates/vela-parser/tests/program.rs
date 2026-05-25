@@ -17,7 +17,7 @@ fn empty_program() {
 fn single_let_statement() {
     assert_eq!(
         p("let x = 1\n"),
-        vec![Stmt::Let { name: "x".into(), params: vec![], body: lit(1) }],
+        vec![Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) }],
     );
 }
 
@@ -26,8 +26,8 @@ fn two_statements_newline_separated() {
     assert_eq!(
         p("let x = 1\nlet y = 2\n"),
         vec![
-            Stmt::Let { name: "x".into(), params: vec![], body: lit(1) },
-            Stmt::Let { name: "y".into(), params: vec![], body: lit(2) },
+            Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) },
+            Stmt::Let { name: "y".into(), params: vec![], return_ty: None, body: lit(2) },
         ],
     );
 }
@@ -37,7 +37,7 @@ fn trailing_expression_statement() {
     assert_eq!(
         p("let x = 1\nx"),
         vec![
-            Stmt::Let { name: "x".into(), params: vec![], body: lit(1) },
+            Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) },
             Stmt::Expr(Expr::Var("x".into())),
         ],
     );
@@ -47,7 +47,7 @@ fn trailing_expression_statement() {
 fn no_trailing_newline_ok() {
     assert_eq!(
         p("let x = 1"),
-        vec![Stmt::Let { name: "x".into(), params: vec![], body: lit(1) }],
+        vec![Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) }],
     );
 }
 
@@ -56,8 +56,8 @@ fn blank_lines_between_statements() {
     assert_eq!(
         p("let x = 1\n\nlet y = 2\n"),
         vec![
-            Stmt::Let { name: "x".into(), params: vec![], body: lit(1) },
-            Stmt::Let { name: "y".into(), params: vec![], body: lit(2) },
+            Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) },
+            Stmt::Let { name: "y".into(), params: vec![], return_ty: None, body: lit(2) },
         ],
     );
 }
@@ -67,8 +67,8 @@ fn comment_only_lines_are_skipped() {
     assert_eq!(
         p("let x = 1\n# nothing\nlet y = 2"),
         vec![
-            Stmt::Let { name: "x".into(), params: vec![], body: lit(1) },
-            Stmt::Let { name: "y".into(), params: vec![], body: lit(2) },
+            Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) },
+            Stmt::Let { name: "y".into(), params: vec![], return_ty: None, body: lit(2) },
         ],
     );
 }

@@ -38,7 +38,7 @@ let area shape =
     match &program.stmts[1] {
         Stmt::Let { name, params, .. } => {
             assert_eq!(name, "standardize");
-            assert_eq!(params, &vec!["xs".to_string()]);
+            assert_eq!(params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["xs"]);
         }
         other => panic!("expected let standardize, got {other:?}"),
     }
@@ -46,7 +46,7 @@ let area shape =
     match &program.stmts[2] {
         Stmt::Let { name, params, .. } => {
             assert_eq!(name, "load");
-            assert_eq!(params, &vec!["path".to_string()]);
+            assert_eq!(params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["path"]);
         }
         other => panic!("expected let load, got {other:?}"),
     }
@@ -68,7 +68,7 @@ let area shape =
     match &program.stmts[4] {
         Stmt::Let { name, params, .. } => {
             assert_eq!(name, "area");
-            assert_eq!(params, &vec!["shape".to_string()]);
+            assert_eq!(params.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["shape"]);
         }
         other => panic!("expected let area, got {other:?}"),
     }

@@ -9,13 +9,31 @@ pub struct Program {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
-    Let { name: String, params: Vec<String>, body: Expr },
-    Var { name: String, body: Expr },
+    Let { name: String, params: Vec<Param>, return_ty: Option<Ty>, body: Expr },
+    Var { name: String, ty: Option<Ty>, body: Expr },
     Mutate { name: String, body: Expr },
     For { binding: String, iter: Expr, body: Expr },
     TypeDecl(TypeDecl),
     Import { path: Vec<String>, kind: ImportKind, public: bool },
     Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Param {
+    pub name: String,
+    pub ty: Option<Ty>,
+}
+
+impl From<&str> for Param {
+    fn from(name: &str) -> Self {
+        Param { name: name.into(), ty: None }
+    }
+}
+
+impl From<String> for Param {
+    fn from(name: String) -> Self {
+        Param { name, ty: None }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -232,19 +250,47 @@ impl Parser {
                 self.bump();
                 let name = self.expect_ident()?;
                 let mut params = Vec::new();
-                while let Some(TokenKind::Ident(_)) = self.peek() {
-                    params.push(self.expect_ident()?);
+                loop {
+                    match self.peek() {
+                        Some(TokenKind::Ident(_)) => {
+                            let n = self.expect_ident()?;
+                            params.push(Param { name: n, ty: None });
+                        }
+                        Some(TokenKind::Punct(Punct::LParen)) => {
+                            let save = self.pos;
+                            self.bump();
+                            if let Some(p) = self.try_typed_param() {
+                                params.push(p);
+                            } else {
+                                self.pos = save;
+                                break;
+                            }
+                        }
+                        _ => break,
+                    }
                 }
+                let return_ty = if matches!(self.peek(), Some(TokenKind::Punct(Punct::Colon))) {
+                    self.bump();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
                 self.expect(&TokenKind::Op(Op::Assign))?;
                 let body = self.parse_body_after_block_intro()?;
-                Ok(Stmt::Let { name, params, body })
+                Ok(Stmt::Let { name, params, return_ty, body })
             }
             Some(TokenKind::Keyword(Keyword::Var)) => {
                 self.bump();
                 let name = self.expect_ident()?;
+                let ty = if matches!(self.peek(), Some(TokenKind::Punct(Punct::Colon))) {
+                    self.bump();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
                 self.expect(&TokenKind::Op(Op::Assign))?;
                 let body = self.parse_body_after_block_intro()?;
-                Ok(Stmt::Var { name, body })
+                Ok(Stmt::Var { name, ty, body })
             }
             Some(TokenKind::Keyword(Keyword::For)) => {
                 self.bump();
@@ -292,6 +338,26 @@ impl Parser {
                 }
             }
         }
+    }
+
+    fn try_typed_param(&mut self) -> Option<Param> {
+        let save = self.pos;
+        let name = match self.peek() {
+            Some(TokenKind::Ident(_)) => self.expect_ident().ok()?,
+            _ => return None,
+        };
+        if !matches!(self.peek(), Some(TokenKind::Punct(Punct::Colon))) {
+            self.pos = save;
+            return None;
+        }
+        self.bump();
+        let ty = self.parse_type().ok()?;
+        if !matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
+            self.pos = save;
+            return None;
+        }
+        self.bump();
+        Some(Param { name, ty: Some(ty) })
     }
 
     fn parse_import(&mut self, public: bool) -> Result<Stmt, ParseError> {
