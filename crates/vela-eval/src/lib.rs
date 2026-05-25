@@ -313,10 +313,11 @@ fn match_pat(pat: &Pat, value: &Value) -> Option<Vec<(String, Value)>> {
             Some(bs)
         }
         (Pat::Range(lo, hi), Value::Int(v)) => {
-            if let (Pat::Lit(Lit::Int(l)), Pat::Lit(Lit::Int(h))) = (&**lo, &**hi) {
-                if l <= v && v <= h {
-                    return Some(Vec::new());
-                }
+            if let (Pat::Lit(Lit::Int(l)), Pat::Lit(Lit::Int(h))) = (&**lo, &**hi)
+                && l <= v
+                && v <= h
+            {
+                return Some(Vec::new());
             }
             None
         }
