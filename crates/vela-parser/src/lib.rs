@@ -294,20 +294,16 @@ impl Parser {
         Some(tok)
     }
 
-    fn err(&self, message: impl Into<String>) -> ParseError {
-        ParseError::new(message).with_span(self.current_span())
-    }
-
     fn expect(&mut self, expected: &TokenKind) -> Result<(), ParseError> {
         let span = self.current_span();
         match self.bump() {
             Some(ref t) if t == expected => Ok(()),
             Some(other) => Err(ParseError::new(format!(
-                "expected {expected:?}, found {other:?}"
+                "expected {expected}, found {other}"
             ))
             .with_span(span)),
             None => Err(ParseError::new(format!(
-                "expected {expected:?}, found end of input"
+                "expected {expected}, found end of input"
             ))
             .with_span(span)),
         }
@@ -527,7 +523,7 @@ impl Parser {
         match self.bump() {
             Some(TokenKind::Str(s)) => Ok(s),
             Some(other) => {
-                Err(ParseError::new(format!("expected string literal, found {other:?}")))
+                Err(ParseError::new(format!("expected string literal, found {other}")))
             }
             None => Err(ParseError::new("expected string literal, found end of input")),
         }
@@ -1163,14 +1159,14 @@ impl Parser {
                     Ok(Pat::Var(name))
                 }
             }
-            other => Err(ParseError::new(format!("unexpected token in pattern: {other:?}"))),
+            other => Err(ParseError::new(format!("unexpected token in pattern: {other}"))),
         }
     }
 
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         match self.bump() {
             Some(TokenKind::Ident(name)) => Ok(name),
-            Some(other) => Err(ParseError::new(format!("expected identifier, found {other:?}"))),
+            Some(other) => Err(ParseError::new(format!("expected identifier, found {other}"))),
             None => Err(ParseError::new("expected identifier, found end of input")),
         }
     }
@@ -1308,7 +1304,7 @@ impl Parser {
             TokenKind::Punct(Punct::LBracket) => self.parse_series(),
             TokenKind::Punct(Punct::FrameOpen) => self.parse_dataframe(),
             TokenKind::Punct(Punct::ArrayOpen) => self.parse_array(),
-            other => Err(ParseError::new(format!("unexpected token: {other:?}")).with_span(span)),
+            other => Err(ParseError::new(format!("unexpected token: {other}")).with_span(span)),
         }
     }
 }

@@ -1,6 +1,7 @@
 //! Lexical analysis for the Vela language.
 
 use std::collections::VecDeque;
+use std::fmt;
 use std::ops::Range;
 
 pub type Span = Range<usize>;
@@ -112,6 +113,121 @@ pub enum Keyword {
     And,
     Or,
     Not,
+}
+
+impl fmt::Display for TokenKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TokenKind::Int(_) => f.write_str("integer literal"),
+            TokenKind::UInt(_) => f.write_str("unsigned integer literal"),
+            TokenKind::BigInt(_) => f.write_str("BigInt literal"),
+            TokenKind::Float(_) => f.write_str("float literal"),
+            TokenKind::Decimal(_) => f.write_str("decimal literal"),
+            TokenKind::Str(_) => f.write_str("string literal"),
+            TokenKind::Bool(b) => write!(f, "`{b}`"),
+            TokenKind::Ident(n) => write!(f, "identifier `{n}`"),
+            TokenKind::Sym(n) => write!(f, "symbol `:{n}`"),
+            TokenKind::Keyword(k) => write!(f, "`{}`", k.display()),
+            TokenKind::Op(o) => write!(f, "`{}`", o.display()),
+            TokenKind::Punct(p) => write!(f, "`{}`", p.display()),
+            TokenKind::DocComment(_) => f.write_str("doc comment"),
+            TokenKind::ModDoc(_) => f.write_str("module doc comment"),
+            TokenKind::Newline => f.write_str("newline"),
+            TokenKind::Indent => f.write_str("indent"),
+            TokenKind::Dedent => f.write_str("dedent"),
+        }
+    }
+}
+
+impl Keyword {
+    pub fn display(self) -> &'static str {
+        match self {
+            Keyword::Let => "let",
+            Keyword::Var => "var",
+            Keyword::Fn => "fn",
+            Keyword::If => "if",
+            Keyword::Then => "then",
+            Keyword::Else => "else",
+            Keyword::Match => "match",
+            Keyword::With => "with",
+            Keyword::When => "when",
+            Keyword::Type => "type",
+            Keyword::Trait => "trait",
+            Keyword::Impl => "impl",
+            Keyword::For => "for",
+            Keyword::In => "in",
+            Keyword::Return => "return",
+            Keyword::Pub => "pub",
+            Keyword::Module => "module",
+            Keyword::Import => "import",
+            Keyword::As => "as",
+            Keyword::Where => "where",
+            Keyword::Scope => "scope",
+            Keyword::Spawn => "spawn",
+            Keyword::Extern => "extern",
+            Keyword::Open => "open",
+            Keyword::App => "app",
+            Keyword::Input => "input",
+            Keyword::Output => "output",
+            Keyword::Tests => "tests",
+            Keyword::Test => "test",
+            Keyword::Prop => "prop",
+            Keyword::And => "and",
+            Keyword::Or => "or",
+            Keyword::Not => "not",
+        }
+    }
+}
+
+impl Op {
+    pub fn display(self) -> &'static str {
+        match self {
+            Op::Dot => ".",
+            Op::Question => "?",
+            Op::Caret => "^",
+            Op::Star => "*",
+            Op::Slash => "/",
+            Op::Percent => "%",
+            Op::Plus => "+",
+            Op::Minus => "-",
+            Op::PlusPlus => "++",
+            Op::Eq => "==",
+            Op::NotEq => "!=",
+            Op::Lt => "<",
+            Op::Le => "<=",
+            Op::Gt => ">",
+            Op::Ge => ">=",
+            Op::Tilde => "~",
+            Op::Pipe => "|>",
+            Op::Assign => "=",
+            Op::LArrow => "<-",
+            Op::RArrow => "->",
+            Op::DotDot => "..",
+            Op::DotDotEq => "..=",
+        }
+    }
+}
+
+impl Punct {
+    pub fn display(self) -> &'static str {
+        match self {
+            Punct::Colon => ":",
+            Punct::Comma => ",",
+            Punct::Semi => ";",
+            Punct::Bar => "|",
+            Punct::Tick => "'",
+            Punct::LParen => "(",
+            Punct::RParen => ")",
+            Punct::LBracket => "[",
+            Punct::RBracket => "]",
+            Punct::LBrace => "{",
+            Punct::RBrace => "}",
+            Punct::ArrayOpen => "[|",
+            Punct::ArrayClose => "|]",
+            Punct::FrameOpen => "{|",
+            Punct::FrameClose => "|}",
+        }
+    }
 }
 
 pub fn lex(src: &str) -> Lexer<'_> {
