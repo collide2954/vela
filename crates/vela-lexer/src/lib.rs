@@ -18,6 +18,46 @@ pub enum TokenKind {
     Float(f64),
     Decimal(String),
     Str(String),
+    Bool(bool),
+    Ident(String),
+    Keyword(Keyword),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Keyword {
+    Let,
+    Var,
+    Fn,
+    If,
+    Then,
+    Else,
+    Match,
+    With,
+    When,
+    Type,
+    Trait,
+    Impl,
+    For,
+    In,
+    Return,
+    Pub,
+    Module,
+    Import,
+    As,
+    Where,
+    Scope,
+    Spawn,
+    Extern,
+    Open,
+    App,
+    Input,
+    Output,
+    Tests,
+    Test,
+    Prop,
+    And,
+    Or,
+    Not,
 }
 
 pub fn lex(src: &str) -> Lexer<'_> {
@@ -201,7 +241,7 @@ impl<'a> Lexer<'a> {
         Token { kind: TokenKind::Str(buf), span: start..self.pos }
     }
 
-    fn lex_word(&mut self) -> Option<Token> {
+    fn lex_word(&mut self) -> Token {
         let start = self.pos;
         while let Some(b) = self.peek() {
             if b.is_ascii_alphanumeric() || b == b'_' {
@@ -214,9 +254,44 @@ impl<'a> Lexer<'a> {
         let kind = match text {
             "NaN" => TokenKind::Float(f64::NAN),
             "Inf" => TokenKind::Float(f64::INFINITY),
-            _ => return None,
+            "true" => TokenKind::Bool(true),
+            "false" => TokenKind::Bool(false),
+            "let" => TokenKind::Keyword(Keyword::Let),
+            "var" => TokenKind::Keyword(Keyword::Var),
+            "fn" => TokenKind::Keyword(Keyword::Fn),
+            "if" => TokenKind::Keyword(Keyword::If),
+            "then" => TokenKind::Keyword(Keyword::Then),
+            "else" => TokenKind::Keyword(Keyword::Else),
+            "match" => TokenKind::Keyword(Keyword::Match),
+            "with" => TokenKind::Keyword(Keyword::With),
+            "when" => TokenKind::Keyword(Keyword::When),
+            "type" => TokenKind::Keyword(Keyword::Type),
+            "trait" => TokenKind::Keyword(Keyword::Trait),
+            "impl" => TokenKind::Keyword(Keyword::Impl),
+            "for" => TokenKind::Keyword(Keyword::For),
+            "in" => TokenKind::Keyword(Keyword::In),
+            "return" => TokenKind::Keyword(Keyword::Return),
+            "pub" => TokenKind::Keyword(Keyword::Pub),
+            "module" => TokenKind::Keyword(Keyword::Module),
+            "import" => TokenKind::Keyword(Keyword::Import),
+            "as" => TokenKind::Keyword(Keyword::As),
+            "where" => TokenKind::Keyword(Keyword::Where),
+            "scope" => TokenKind::Keyword(Keyword::Scope),
+            "spawn" => TokenKind::Keyword(Keyword::Spawn),
+            "extern" => TokenKind::Keyword(Keyword::Extern),
+            "open" => TokenKind::Keyword(Keyword::Open),
+            "app" => TokenKind::Keyword(Keyword::App),
+            "input" => TokenKind::Keyword(Keyword::Input),
+            "output" => TokenKind::Keyword(Keyword::Output),
+            "tests" => TokenKind::Keyword(Keyword::Tests),
+            "test" => TokenKind::Keyword(Keyword::Test),
+            "prop" => TokenKind::Keyword(Keyword::Prop),
+            "and" => TokenKind::Keyword(Keyword::And),
+            "or" => TokenKind::Keyword(Keyword::Or),
+            "not" => TokenKind::Keyword(Keyword::Not),
+            other => TokenKind::Ident(other.to_string()),
         };
-        Some(Token { kind, span: start..self.pos })
+        Token { kind, span: start..self.pos }
     }
 }
 
@@ -231,7 +306,7 @@ impl Iterator for Lexer<'_> {
         } else if b == b'"' {
             Some(self.lex_string())
         } else if b.is_ascii_alphabetic() || b == b'_' {
-            self.lex_word()
+            Some(self.lex_word())
         } else {
             None
         }
