@@ -17,6 +17,7 @@ pub enum TokenKind {
     BigInt(String),
     Float(f64),
     Decimal(String),
+    Str(String),
 }
 
 pub fn lex(src: &str) -> Lexer<'_> {
@@ -166,6 +167,40 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn lex_string(&mut self) -> Token {
+        let start = self.pos;
+        self.pos += 1;
+        let mut buf = String::new();
+        while let Some(b) = self.peek() {
+            match b {
+                b'"' => {
+                    self.pos += 1;
+                    return Token { kind: TokenKind::Str(buf), span: start..self.pos };
+                }
+                b'\\' => {
+                    self.pos += 1;
+                    let next = self.peek().unwrap_or(b'\\');
+                    let ch = match next {
+                        b'n' => '\n',
+                        b't' => '\t',
+                        b'r' => '\r',
+                        b'"' => '"',
+                        b'\\' => '\\',
+                        b'0' => '\0',
+                        other => other as char,
+                    };
+                    buf.push(ch);
+                    self.pos += 1;
+                }
+                _ => {
+                    buf.push(b as char);
+                    self.pos += 1;
+                }
+            }
+        }
+        Token { kind: TokenKind::Str(buf), span: start..self.pos }
+    }
+
     fn lex_word(&mut self) -> Option<Token> {
         let start = self.pos;
         while let Some(b) = self.peek() {
@@ -193,6 +228,8 @@ impl Iterator for Lexer<'_> {
         let b = self.peek()?;
         if b.is_ascii_digit() {
             Some(self.lex_number())
+        } else if b == b'"' {
+            Some(self.lex_string())
         } else if b.is_ascii_alphabetic() || b == b'_' {
             self.lex_word()
         } else {
