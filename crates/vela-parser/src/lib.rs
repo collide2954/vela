@@ -19,6 +19,21 @@ pub enum Expr {
     App(Box<Expr>, Box<Expr>),
     Lambda(Vec<String>, Box<Expr>),
     If(Box<Expr>, Box<Expr>, Box<Expr>),
+    Match(Box<Expr>, Vec<MatchArm>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pat: Pat,
+    pub body: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pat {
+    Wildcard,
+    Var(String),
+    Lit(Lit),
+    Cons(String, Vec<Pat>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,6 +164,50 @@ impl Parser {
         }
     }
 
+    fn parse_pat(&mut self) -> Result<Pat, ParseError> {
+        let tok = self.bump().ok_or_else(|| ParseError::new("expected pattern"))?;
+        match tok {
+            TokenKind::Int(n) => Ok(Pat::Lit(Lit::Int(n))),
+            TokenKind::Float(f) => Ok(Pat::Lit(Lit::Float(f))),
+            TokenKind::Str(s) => Ok(Pat::Lit(Lit::Str(s))),
+            TokenKind::Bool(b) => Ok(Pat::Lit(Lit::Bool(b))),
+            TokenKind::Ident(name) => {
+                if name == "_" {
+                    Ok(Pat::Wildcard)
+                } else if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                    let mut args = Vec::new();
+                    while self.peek().is_some_and(starts_pat_atom) {
+                        args.push(self.parse_pat_atom()?);
+                    }
+                    Ok(Pat::Cons(name, args))
+                } else {
+                    Ok(Pat::Var(name))
+                }
+            }
+            other => Err(ParseError::new(format!("unexpected token in pattern: {other:?}"))),
+        }
+    }
+
+    fn parse_pat_atom(&mut self) -> Result<Pat, ParseError> {
+        let tok = self.bump().ok_or_else(|| ParseError::new("expected pattern atom"))?;
+        match tok {
+            TokenKind::Int(n) => Ok(Pat::Lit(Lit::Int(n))),
+            TokenKind::Float(f) => Ok(Pat::Lit(Lit::Float(f))),
+            TokenKind::Str(s) => Ok(Pat::Lit(Lit::Str(s))),
+            TokenKind::Bool(b) => Ok(Pat::Lit(Lit::Bool(b))),
+            TokenKind::Ident(name) => {
+                if name == "_" {
+                    Ok(Pat::Wildcard)
+                } else if name.starts_with(|c: char| c.is_ascii_uppercase()) {
+                    Ok(Pat::Cons(name, Vec::new()))
+                } else {
+                    Ok(Pat::Var(name))
+                }
+            }
+            other => Err(ParseError::new(format!("unexpected token in pattern: {other:?}"))),
+        }
+    }
+
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         match self.bump() {
             Some(TokenKind::Ident(name)) => Ok(name),
@@ -216,6 +275,22 @@ impl Parser {
                 let else_b = self.parse_expr_bp(0)?;
                 Ok(Expr::If(Box::new(cond), Box::new(then_b), Box::new(else_b)))
             }
+            TokenKind::Keyword(Keyword::Match) => {
+                let scrut = self.parse_expr_bp(0)?;
+                self.expect(&TokenKind::Keyword(Keyword::With))?;
+                let mut arms = Vec::new();
+                while matches!(self.peek(), Some(TokenKind::Punct(Punct::Bar))) {
+                    self.bump();
+                    let pat = self.parse_pat()?;
+                    self.expect(&TokenKind::Op(Op::RArrow))?;
+                    let body = self.parse_expr_bp(0)?;
+                    arms.push(MatchArm { pat, body });
+                }
+                if arms.is_empty() {
+                    return Err(ParseError::new("match expression has no arms"));
+                }
+                Ok(Expr::Match(Box::new(scrut), arms))
+            }
             TokenKind::Punct(Punct::LParen) => {
                 if matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
                     self.bump();
@@ -231,6 +306,20 @@ impl Parser {
 }
 
 const APP_BP: u8 = 25;
+
+fn starts_pat_atom(tok: &TokenKind) -> bool {
+    matches!(
+        tok,
+        TokenKind::Int(_)
+            | TokenKind::UInt(_)
+            | TokenKind::BigInt(_)
+            | TokenKind::Float(_)
+            | TokenKind::Decimal(_)
+            | TokenKind::Str(_)
+            | TokenKind::Bool(_)
+            | TokenKind::Ident(_)
+    )
+}
 
 fn starts_atom(tok: &TokenKind) -> bool {
     matches!(
