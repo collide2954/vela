@@ -76,14 +76,10 @@ let area shape =
 
 #[test]
 fn dataframe_pipeline_parses() {
-    // The formatter's canonical multi-line pipeline (break before `|>`) is
-    // not yet supported across raw newlines; parenthesizing it suppresses
-    // newlines and keeps the pipeline a single logical expression.
-    let src = r#"let stats = (
+    let src = r#"let stats =
     df
     |> group_by :species
     |> summarize { mu = mean (col :petal_length) }
-)
 "#;
     let program = parse_program(src).expect("dataframe pipeline parses");
     assert_eq!(program.stmts.len(), 1);

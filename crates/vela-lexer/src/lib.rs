@@ -250,6 +250,37 @@ impl<'a> Lexer<'a> {
         self.eof_emitted = true;
     }
 
+    fn next_line_continues_expression(&self) -> bool {
+        let bytes = self.src.as_bytes();
+        let mut p = self.pos + 1;
+        loop {
+            while matches!(bytes.get(p).copied(), Some(b' ' | b'\t')) {
+                p += 1;
+            }
+            match bytes.get(p).copied() {
+                Some(b'\n') => {
+                    p += 1;
+                }
+                Some(b'#') => {
+                    while p < bytes.len() && bytes[p] != b'\n' {
+                        p += 1;
+                    }
+                }
+                Some(b'|') if bytes.get(p + 1).copied() == Some(b'>') => return true,
+                Some(b'+') if bytes.get(p + 1).copied() == Some(b'+') => return true,
+                _ => return false,
+            }
+        }
+    }
+
+    fn skip_line_continuation(&mut self) {
+        self.pos += 1;
+        self.skip_blank_lines();
+        while matches!(self.peek(), Some(b' ' | b'\t')) {
+            self.pos += 1;
+        }
+    }
+
     fn track_paren(&mut self, kind: &TokenKind) {
         match kind {
             TokenKind::Punct(
@@ -708,6 +739,10 @@ impl Iterator for Lexer<'_> {
                 continue;
             };
             if b == b'\n' {
+                if self.paren_depth == 0 && self.next_line_continues_expression() {
+                    self.skip_line_continuation();
+                    continue;
+                }
                 self.pos += 1;
                 if self.paren_depth == 0 && self.emitted_any && !self.last_was_newline {
                     self.pending.push_back(self.synthetic(TokenKind::Newline));
