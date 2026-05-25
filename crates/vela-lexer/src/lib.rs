@@ -24,6 +24,8 @@ pub enum TokenKind {
     Keyword(Keyword),
     Op(Op),
     Punct(Punct),
+    DocComment(String),
+    ModDoc(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,13 +133,51 @@ impl<'a> Lexer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
+        loop {
+            while let Some(b) = self.peek() {
+                if b == b' ' || b == b'\t' {
+                    self.pos += 1;
+                } else {
+                    break;
+                }
+            }
+            if self.peek() == Some(b'#') {
+                self.skip_to_eol();
+                continue;
+            }
+            if self.peek() == Some(b'/')
+                && self.peek_at(1) == Some(b'/')
+                && !matches!(self.peek_at(2), Some(b'/') | Some(b'!'))
+            {
+                self.skip_to_eol();
+                continue;
+            }
+            break;
+        }
+    }
+
+    fn skip_to_eol(&mut self) {
         while let Some(b) = self.peek() {
-            if b == b' ' || b == b'\t' {
-                self.pos += 1;
-            } else {
+            self.pos += 1;
+            if b == b'\n' {
                 break;
             }
         }
+    }
+
+    fn read_to_eol(&mut self) -> String {
+        let start = self.pos;
+        while let Some(b) = self.peek() {
+            if b == b'\n' {
+                break;
+            }
+            self.pos += 1;
+        }
+        let text = self.src[start..self.pos].trim().to_string();
+        if self.peek() == Some(b'\n') {
+            self.pos += 1;
+        }
+        text
     }
 
     fn lex_number(&mut self) -> Token {
@@ -364,6 +404,22 @@ impl Iterator for Lexer<'_> {
     fn next(&mut self) -> Option<Token> {
         self.skip_whitespace();
         let b = self.peek()?;
+        if b == b'/' && self.peek_at(1) == Some(b'/') {
+            let start = self.pos;
+            return match self.peek_at(2) {
+                Some(b'/') => {
+                    self.pos += 3;
+                    let body = self.read_to_eol();
+                    Some(Token { kind: TokenKind::DocComment(body), span: start..self.pos })
+                }
+                Some(b'!') => {
+                    self.pos += 3;
+                    let body = self.read_to_eol();
+                    Some(Token { kind: TokenKind::ModDoc(body), span: start..self.pos })
+                }
+                _ => unreachable!("// without doc form was skipped by skip_whitespace"),
+            };
+        }
         if b.is_ascii_digit() {
             return Some(self.lex_number());
         }
