@@ -638,13 +638,16 @@ fn infer_binary(
         BinOp::Concat => {
             ctx.unify(&l, &r)?;
             let resolved = ctx.resolve(&l);
-            if resolved != Type::String {
-                return Err(TypeError::new(format!(
-                    "`++` not yet supported for {}",
-                    resolved.show()
-                )));
+            match resolved {
+                Type::String | Type::Series(_) => Ok(resolved),
+                Type::Var(_) => Err(TypeError::new(
+                    "`++` operands are ambiguous; annotate them",
+                )),
+                other => Err(TypeError::new(format!(
+                    "`++` requires String or Series, got {}",
+                    other.show()
+                ))),
             }
-            Ok(Type::String)
         }
         BinOp::Pipe | BinOp::Tilde => Err(TypeError::new(format!(
             "`{op:?}` typing not yet implemented"
