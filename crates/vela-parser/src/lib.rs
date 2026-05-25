@@ -34,6 +34,7 @@ pub enum Expr {
     DataFrameLit(Vec<(String, Expr)>),
     ArrayLit(Vec<Vec<Expr>>),
     Sym(String),
+    Block { stmts: Vec<Stmt>, trailing: Option<Box<Expr>> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,10 +143,7 @@ struct Parser {
 
 impl Parser {
     fn new(src: &str) -> Self {
-        let tokens = lex(src)
-            .map(|t| t.kind)
-            .filter(|k| !matches!(k, TokenKind::Indent | TokenKind::Dedent))
-            .collect();
+        let tokens = lex(src).map(|t| t.kind).collect();
         Self { tokens, pos: 0 }
     }
 
@@ -185,14 +183,14 @@ impl Parser {
                     params.push(self.expect_ident()?);
                 }
                 self.expect(&TokenKind::Op(Op::Assign))?;
-                let body = self.parse_expr_bp(0)?;
+                let body = self.parse_body_after_block_intro()?;
                 Ok(Stmt::Let { name, params, body })
             }
             Some(TokenKind::Keyword(Keyword::Var)) => {
                 self.bump();
                 let name = self.expect_ident()?;
                 self.expect(&TokenKind::Op(Op::Assign))?;
-                let body = self.parse_expr_bp(0)?;
+                let body = self.parse_body_after_block_intro()?;
                 Ok(Stmt::Var { name, body })
             }
             _ => {
@@ -211,6 +209,34 @@ impl Parser {
                 }
             }
         }
+    }
+
+    fn parse_body_after_block_intro(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek(), Some(TokenKind::Newline)) {
+            let save = self.pos;
+            self.bump();
+            if matches!(self.peek(), Some(TokenKind::Indent)) {
+                self.bump();
+                return self.parse_block_contents();
+            }
+            self.pos = save;
+        }
+        self.parse_expr_bp(0)
+    }
+
+    fn parse_block_contents(&mut self) -> Result<Expr, ParseError> {
+        let mut stmts = Vec::new();
+        loop {
+            self.skip_newlines();
+            if matches!(self.peek(), Some(TokenKind::Dedent) | None) {
+                break;
+            }
+            stmts.push(self.parse_stmt()?);
+        }
+        if matches!(self.peek(), Some(TokenKind::Dedent)) {
+            self.bump();
+        }
+        Ok(flatten_block(stmts))
     }
 
     fn parse_record(&mut self) -> Result<Expr, ParseError> {
@@ -512,6 +538,27 @@ impl Parser {
 
 const APP_BP: u8 = 25;
 const FIELD_BP: u8 = 28;
+
+fn flatten_block(mut stmts: Vec<Stmt>) -> Expr {
+    if stmts.len() == 1 {
+        if matches!(stmts[0], Stmt::Expr(_)) {
+            if let Stmt::Expr(e) = stmts.pop().expect("nonempty") {
+                return e;
+            }
+        }
+    }
+    let trailing = if matches!(stmts.last(), Some(Stmt::Expr(_))) {
+        let last = stmts.pop().expect("nonempty");
+        if let Stmt::Expr(e) = last {
+            Some(Box::new(e))
+        } else {
+            unreachable!()
+        }
+    } else {
+        None
+    };
+    Expr::Block { stmts, trailing }
+}
 
 fn starts_pat_atom(tok: &TokenKind) -> bool {
     matches!(
