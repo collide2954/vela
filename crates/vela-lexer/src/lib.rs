@@ -22,6 +22,53 @@ pub enum TokenKind {
     Ident(String),
     Sym(String),
     Keyword(Keyword),
+    Op(Op),
+    Punct(Punct),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Op {
+    Dot,
+    Question,
+    Caret,
+    Star,
+    Slash,
+    Percent,
+    Plus,
+    Minus,
+    PlusPlus,
+    Eq,
+    NotEq,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Tilde,
+    Pipe,
+    Assign,
+    LArrow,
+    RArrow,
+    DotDot,
+    DotDotEq,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Punct {
+    Colon,
+    Comma,
+    Semi,
+    Bar,
+    Tick,
+    LParen,
+    RParen,
+    LBracket,
+    RBracket,
+    LBrace,
+    RBrace,
+    ArrayOpen,
+    ArrayClose,
+    FrameOpen,
+    FrameClose,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -318,17 +365,167 @@ impl Iterator for Lexer<'_> {
         self.skip_whitespace();
         let b = self.peek()?;
         if b.is_ascii_digit() {
-            Some(self.lex_number())
-        } else if b == b'"' {
-            Some(self.lex_string())
-        } else if b == b':'
-            && self.peek_at(1).is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
-        {
-            Some(self.lex_symbol())
-        } else if b.is_ascii_alphabetic() || b == b'_' {
-            Some(self.lex_word())
-        } else {
-            None
+            return Some(self.lex_number());
         }
+        if b == b'"' {
+            return Some(self.lex_string());
+        }
+        if b == b':' && self.peek_at(1).is_some_and(|b| b.is_ascii_alphabetic() || b == b'_') {
+            return Some(self.lex_symbol());
+        }
+        if b.is_ascii_alphabetic() || b == b'_' {
+            return Some(self.lex_word());
+        }
+        self.lex_punct()
+    }
+}
+
+impl Lexer<'_> {
+    fn lex_punct(&mut self) -> Option<Token> {
+        let start = self.pos;
+        let b = self.peek()?;
+        let mut kind = None;
+        match b {
+            b'(' => kind = Some(TokenKind::Punct(Punct::LParen)),
+            b')' => kind = Some(TokenKind::Punct(Punct::RParen)),
+            b']' => kind = Some(TokenKind::Punct(Punct::RBracket)),
+            b'}' => kind = Some(TokenKind::Punct(Punct::RBrace)),
+            b',' => kind = Some(TokenKind::Punct(Punct::Comma)),
+            b';' => kind = Some(TokenKind::Punct(Punct::Semi)),
+            b':' => kind = Some(TokenKind::Punct(Punct::Colon)),
+            b'\'' => kind = Some(TokenKind::Punct(Punct::Tick)),
+            b'?' => kind = Some(TokenKind::Op(Op::Question)),
+            b'^' => kind = Some(TokenKind::Op(Op::Caret)),
+            b'*' => kind = Some(TokenKind::Op(Op::Star)),
+            b'/' => kind = Some(TokenKind::Op(Op::Slash)),
+            b'%' => kind = Some(TokenKind::Op(Op::Percent)),
+            b'~' => kind = Some(TokenKind::Op(Op::Tilde)),
+            b'[' => {
+                if self.peek_at(1) == Some(b'|') {
+                    self.pos += 2;
+                    return Some(Token {
+                        kind: TokenKind::Punct(Punct::ArrayOpen),
+                        span: start..self.pos,
+                    });
+                }
+                kind = Some(TokenKind::Punct(Punct::LBracket));
+            }
+            b'{' => {
+                if self.peek_at(1) == Some(b'|') {
+                    self.pos += 2;
+                    return Some(Token {
+                        kind: TokenKind::Punct(Punct::FrameOpen),
+                        span: start..self.pos,
+                    });
+                }
+                kind = Some(TokenKind::Punct(Punct::LBrace));
+            }
+            b'+' => {
+                if self.peek_at(1) == Some(b'+') {
+                    self.pos += 2;
+                    return Some(Token {
+                        kind: TokenKind::Op(Op::PlusPlus),
+                        span: start..self.pos,
+                    });
+                }
+                kind = Some(TokenKind::Op(Op::Plus));
+            }
+            b'-' => {
+                if self.peek_at(1) == Some(b'>') {
+                    self.pos += 2;
+                    return Some(Token {
+                        kind: TokenKind::Op(Op::RArrow),
+                        span: start..self.pos,
+                    });
+                }
+                kind = Some(TokenKind::Op(Op::Minus));
+            }
+            b'=' => {
+                if self.peek_at(1) == Some(b'=') {
+                    self.pos += 2;
+                    return Some(Token { kind: TokenKind::Op(Op::Eq), span: start..self.pos });
+                }
+                kind = Some(TokenKind::Op(Op::Assign));
+            }
+            b'!' => {
+                if self.peek_at(1) == Some(b'=') {
+                    self.pos += 2;
+                    return Some(Token {
+                        kind: TokenKind::Op(Op::NotEq),
+                        span: start..self.pos,
+                    });
+                }
+            }
+            b'<' => {
+                match self.peek_at(1) {
+                    Some(b'-') => {
+                        self.pos += 2;
+                        return Some(Token {
+                            kind: TokenKind::Op(Op::LArrow),
+                            span: start..self.pos,
+                        });
+                    }
+                    Some(b'=') => {
+                        self.pos += 2;
+                        return Some(Token {
+                            kind: TokenKind::Op(Op::Le),
+                            span: start..self.pos,
+                        });
+                    }
+                    _ => kind = Some(TokenKind::Op(Op::Lt)),
+                }
+            }
+            b'>' => {
+                if self.peek_at(1) == Some(b'=') {
+                    self.pos += 2;
+                    return Some(Token { kind: TokenKind::Op(Op::Ge), span: start..self.pos });
+                }
+                kind = Some(TokenKind::Op(Op::Gt));
+            }
+            b'.' => {
+                if self.peek_at(1) == Some(b'.') {
+                    if self.peek_at(2) == Some(b'=') {
+                        self.pos += 3;
+                        return Some(Token {
+                            kind: TokenKind::Op(Op::DotDotEq),
+                            span: start..self.pos,
+                        });
+                    }
+                    self.pos += 2;
+                    return Some(Token {
+                        kind: TokenKind::Op(Op::DotDot),
+                        span: start..self.pos,
+                    });
+                }
+                kind = Some(TokenKind::Op(Op::Dot));
+            }
+            b'|' => match self.peek_at(1) {
+                Some(b'>') => {
+                    self.pos += 2;
+                    return Some(Token {
+                        kind: TokenKind::Op(Op::Pipe),
+                        span: start..self.pos,
+                    });
+                }
+                Some(b']') => {
+                    self.pos += 2;
+                    return Some(Token {
+                        kind: TokenKind::Punct(Punct::ArrayClose),
+                        span: start..self.pos,
+                    });
+                }
+                Some(b'}') => {
+                    self.pos += 2;
+                    return Some(Token {
+                        kind: TokenKind::Punct(Punct::FrameClose),
+                        span: start..self.pos,
+                    });
+                }
+                _ => kind = Some(TokenKind::Punct(Punct::Bar)),
+            },
+            _ => return None,
+        }
+        self.pos += 1;
+        kind.map(|k| Token { kind: k, span: start..self.pos })
     }
 }
