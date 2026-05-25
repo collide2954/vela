@@ -89,6 +89,8 @@ pub enum Pat {
     Var(String),
     Lit(Lit),
     Cons(String, Vec<Pat>),
+    Or(Vec<Pat>),
+    As(Box<Pat>, String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -611,6 +613,37 @@ impl Parser {
         Ok(fields)
     }
 
+    fn parse_arm_pat(&mut self) -> Result<Pat, ParseError> {
+        let mut alts = vec![self.parse_as_pat()?];
+        while matches!(self.peek(), Some(TokenKind::Punct(Punct::Bar))) {
+            let save = self.pos;
+            self.bump();
+            match self.parse_as_pat() {
+                Ok(p) => alts.push(p),
+                Err(_) => {
+                    self.pos = save;
+                    break;
+                }
+            }
+        }
+        Ok(if alts.len() == 1 {
+            alts.pop().expect("nonempty")
+        } else {
+            Pat::Or(alts)
+        })
+    }
+
+    fn parse_as_pat(&mut self) -> Result<Pat, ParseError> {
+        let p = self.parse_pat()?;
+        if matches!(self.peek(), Some(TokenKind::Keyword(Keyword::As))) {
+            self.bump();
+            let name = self.expect_ident()?;
+            Ok(Pat::As(Box::new(p), name))
+        } else {
+            Ok(p)
+        }
+    }
+
     fn parse_pat(&mut self) -> Result<Pat, ParseError> {
         let tok = self.bump().ok_or_else(|| ParseError::new("expected pattern"))?;
         match tok {
@@ -736,7 +769,7 @@ impl Parser {
                 let mut arms = Vec::new();
                 while matches!(self.peek(), Some(TokenKind::Punct(Punct::Bar))) {
                     self.bump();
-                    let pat = self.parse_pat()?;
+                    let pat = self.parse_arm_pat()?;
                     self.expect(&TokenKind::Op(Op::RArrow))?;
                     let body = self.parse_expr_bp(0)?;
                     arms.push(MatchArm { pat, body });
