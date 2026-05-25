@@ -13,7 +13,10 @@ pub struct Token {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TokenKind {
     Int(i64),
+    UInt(u64),
+    BigInt(String),
     Float(f64),
+    Decimal(String),
 }
 
 pub fn lex(src: &str) -> Lexer<'_> {
@@ -73,13 +76,37 @@ impl<'a> Lexer<'a> {
             self.eat_digits(&mut buf);
         }
 
-        let kind = if is_float {
-            TokenKind::Float(buf.parse().expect("digit-only float buffer parses"))
-        } else {
-            TokenKind::Int(buf.parse().expect("digit-only int buffer parses"))
+        let kind = match self.suffix() {
+            Some(b'u') if !is_float => {
+                self.pos += 1;
+                TokenKind::UInt(buf.parse().expect("digit-only u64 parses"))
+            }
+            Some(b'n') if !is_float => {
+                self.pos += 1;
+                TokenKind::BigInt(buf)
+            }
+            Some(b'd') => {
+                self.pos += 1;
+                TokenKind::Decimal(buf)
+            }
+            _ if is_float => {
+                TokenKind::Float(buf.parse().expect("digit-only float buffer parses"))
+            }
+            _ => TokenKind::Int(buf.parse().expect("digit-only int buffer parses")),
         };
 
         Token { kind, span: start..self.pos }
+    }
+
+    fn suffix(&self) -> Option<u8> {
+        let s = self.peek()?;
+        if matches!(s, b'u' | b'n' | b'd')
+            && !self.peek_at(1).is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+        {
+            Some(s)
+        } else {
+            None
+        }
     }
 
     fn eat_digits(&mut self, buf: &mut String) {
