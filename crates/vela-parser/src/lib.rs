@@ -3,6 +3,13 @@
 use vela_lexer::{Keyword, Op, Punct, TokenKind, lex};
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum Stmt {
+    Let { name: String, params: Vec<String>, body: Expr },
+    Var { name: String, body: Expr },
+    Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Lit(Lit),
     Var(String),
@@ -73,6 +80,15 @@ pub fn parse_expr(src: &str) -> Result<Expr, ParseError> {
     Ok(expr)
 }
 
+pub fn parse_stmt(src: &str) -> Result<Stmt, ParseError> {
+    let mut p = Parser::new(src);
+    let stmt = p.parse_stmt()?;
+    if let Some(tok) = p.peek() {
+        return Err(ParseError::new(format!("trailing token {tok:?}")));
+    }
+    Ok(stmt)
+}
+
 struct Parser {
     tokens: Vec<TokenKind>,
     pos: usize,
@@ -104,6 +120,38 @@ impl Parser {
                 Err(ParseError::new(format!("expected {expected:?}, found {other:?}")))
             }
             None => Err(ParseError::new(format!("expected {expected:?}, found end of input"))),
+        }
+    }
+
+    fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
+        match self.peek() {
+            Some(TokenKind::Keyword(Keyword::Let)) => {
+                self.bump();
+                let name = self.expect_ident()?;
+                let mut params = Vec::new();
+                while let Some(TokenKind::Ident(_)) = self.peek() {
+                    params.push(self.expect_ident()?);
+                }
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let body = self.parse_expr_bp(0)?;
+                Ok(Stmt::Let { name, params, body })
+            }
+            Some(TokenKind::Keyword(Keyword::Var)) => {
+                self.bump();
+                let name = self.expect_ident()?;
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let body = self.parse_expr_bp(0)?;
+                Ok(Stmt::Var { name, body })
+            }
+            _ => Ok(Stmt::Expr(self.parse_expr_bp(0)?)),
+        }
+    }
+
+    fn expect_ident(&mut self) -> Result<String, ParseError> {
+        match self.bump() {
+            Some(TokenKind::Ident(name)) => Ok(name),
+            Some(other) => Err(ParseError::new(format!("expected identifier, found {other:?}"))),
+            None => Err(ParseError::new("expected identifier, found end of input")),
         }
     }
 
