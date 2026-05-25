@@ -1,11 +1,14 @@
 //! Syntactic analysis for the Vela language.
 
-use vela_lexer::{Punct, TokenKind, lex};
+use vela_lexer::{Keyword, Op, Punct, TokenKind, lex};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Lit(Lit),
     Var(String),
+    BinOp(BinOp, Box<Expr>, Box<Expr>),
+    UnaryOp(UnOp, Box<Expr>),
+    Postfix(PostOp, Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -15,6 +18,38 @@ pub enum Lit {
     Str(String),
     Bool(bool),
     Unit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    Pipe,
+    Tilde,
+    Or,
+    And,
+    Eq,
+    NotEq,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Concat,
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Pow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnOp {
+    Neg,
+    Not,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostOp {
+    Question,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -30,7 +65,7 @@ impl ParseError {
 
 pub fn parse_expr(src: &str) -> Result<Expr, ParseError> {
     let mut p = Parser::new(src);
-    let expr = p.parse_expr()?;
+    let expr = p.parse_expr_bp(0)?;
     if let Some(tok) = p.peek() {
         return Err(ParseError::new(format!("trailing token {tok:?}")));
     }
@@ -71,8 +106,33 @@ impl Parser {
         }
     }
 
-    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_atom()
+    fn parse_expr_bp(&mut self, min_bp: u8) -> Result<Expr, ParseError> {
+        let mut lhs = if let Some((op, r_bp)) = self.peek().and_then(prefix_op) {
+            self.bump();
+            let rhs = self.parse_expr_bp(r_bp)?;
+            Expr::UnaryOp(op, Box::new(rhs))
+        } else {
+            self.parse_atom()?
+        };
+
+        loop {
+            if let Some((op, l_bp)) = self.peek().and_then(postfix_op) {
+                if l_bp < min_bp {
+                    break;
+                }
+                self.bump();
+                lhs = Expr::Postfix(op, Box::new(lhs));
+                continue;
+            }
+            let Some((op, l_bp, r_bp)) = self.peek().and_then(binary_op) else { break };
+            if l_bp < min_bp {
+                break;
+            }
+            self.bump();
+            let rhs = self.parse_expr_bp(r_bp)?;
+            lhs = Expr::BinOp(op, Box::new(lhs), Box::new(rhs));
+        }
+        Ok(lhs)
     }
 
     fn parse_atom(&mut self) -> Result<Expr, ParseError> {
@@ -88,11 +148,50 @@ impl Parser {
                     self.bump();
                     return Ok(Expr::Lit(Lit::Unit));
                 }
-                let inner = self.parse_expr()?;
+                let inner = self.parse_expr_bp(0)?;
                 self.expect(&TokenKind::Punct(Punct::RParen))?;
                 Ok(inner)
             }
             other => Err(ParseError::new(format!("unexpected token: {other:?}"))),
         }
     }
+}
+
+fn prefix_op(tok: &TokenKind) -> Option<(UnOp, u8)> {
+    let op = match tok {
+        TokenKind::Op(Op::Minus) => UnOp::Neg,
+        TokenKind::Keyword(Keyword::Not) => UnOp::Not,
+        _ => return None,
+    };
+    Some((op, 19))
+}
+
+fn postfix_op(tok: &TokenKind) -> Option<(PostOp, u8)> {
+    match tok {
+        TokenKind::Op(Op::Question) => Some((PostOp::Question, 21)),
+        _ => None,
+    }
+}
+
+fn binary_op(tok: &TokenKind) -> Option<(BinOp, u8, u8)> {
+    Some(match tok {
+        TokenKind::Op(Op::Pipe) => (BinOp::Pipe, 1, 2),
+        TokenKind::Op(Op::Tilde) => (BinOp::Tilde, 3, 4),
+        TokenKind::Keyword(Keyword::Or) => (BinOp::Or, 5, 6),
+        TokenKind::Keyword(Keyword::And) => (BinOp::And, 7, 8),
+        TokenKind::Op(Op::Eq) => (BinOp::Eq, 9, 10),
+        TokenKind::Op(Op::NotEq) => (BinOp::NotEq, 9, 10),
+        TokenKind::Op(Op::Lt) => (BinOp::Lt, 9, 10),
+        TokenKind::Op(Op::Le) => (BinOp::Le, 9, 10),
+        TokenKind::Op(Op::Gt) => (BinOp::Gt, 9, 10),
+        TokenKind::Op(Op::Ge) => (BinOp::Ge, 9, 10),
+        TokenKind::Op(Op::PlusPlus) => (BinOp::Concat, 11, 12),
+        TokenKind::Op(Op::Plus) => (BinOp::Add, 13, 14),
+        TokenKind::Op(Op::Minus) => (BinOp::Sub, 13, 14),
+        TokenKind::Op(Op::Star) => (BinOp::Mul, 15, 16),
+        TokenKind::Op(Op::Slash) => (BinOp::Div, 15, 16),
+        TokenKind::Op(Op::Percent) => (BinOp::Mod, 15, 16),
+        TokenKind::Op(Op::Caret) => (BinOp::Pow, 18, 17),
+        _ => return None,
+    })
 }
