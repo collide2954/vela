@@ -93,6 +93,8 @@ pub enum Pat {
     As(Box<Pat>, String),
     List(Vec<ListPart>),
     Range(Box<Pat>, Box<Pat>),
+    Tuple(Vec<Pat>),
+    Record(Vec<(String, Pat)>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -653,39 +655,73 @@ impl Parser {
     }
 
     fn parse_pat(&mut self) -> Result<Pat, ParseError> {
-        if matches!(self.peek(), Some(TokenKind::Punct(Punct::LBracket))) {
-            self.bump();
-            return self.parse_list_pat_after_bracket();
-        }
-        let tok = self.bump().ok_or_else(|| ParseError::new("expected pattern"))?;
-        let lo = match tok {
-            TokenKind::Int(n) => Pat::Lit(Lit::Int(n)),
-            TokenKind::Float(f) => Pat::Lit(Lit::Float(f)),
-            TokenKind::Str(s) => Pat::Lit(Lit::Str(s)),
-            TokenKind::Bool(b) => Pat::Lit(Lit::Bool(b)),
-            TokenKind::Ident(name) => {
-                if name == "_" {
-                    Pat::Wildcard
-                } else if name.starts_with(|c: char| c.is_ascii_uppercase()) {
-                    let mut args = Vec::new();
-                    while self.peek().is_some_and(starts_pat_atom) {
-                        args.push(self.parse_pat_atom()?);
-                    }
-                    return Ok(Pat::Cons(name, args));
-                } else {
-                    Pat::Var(name)
+        if let Some(TokenKind::Ident(name)) = self.peek() {
+            if name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                let name = self.expect_ident()?;
+                let mut args = Vec::new();
+                while self.peek().is_some_and(starts_pat_atom) {
+                    args.push(self.parse_pat_atom()?);
                 }
+                return Ok(Pat::Cons(name, args));
             }
-            other => {
-                return Err(ParseError::new(format!("unexpected token in pattern: {other:?}")));
-            }
-        };
+        }
+        let lo = self.parse_pat_atom()?;
         if matches!(self.peek(), Some(TokenKind::Op(Op::DotDotEq))) {
             self.bump();
             let hi = self.parse_pat_atom()?;
             return Ok(Pat::Range(Box::new(lo), Box::new(hi)));
         }
         Ok(lo)
+    }
+
+    fn parse_paren_pat_after_lparen(&mut self) -> Result<Pat, ParseError> {
+        if matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
+            self.bump();
+            return Ok(Pat::Lit(Lit::Unit));
+        }
+        let first = self.parse_pat()?;
+        if matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+            let mut elems = vec![first];
+            while matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                self.bump();
+                if matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
+                    break;
+                }
+                elems.push(self.parse_pat()?);
+            }
+            self.expect(&TokenKind::Punct(Punct::RParen))?;
+            Ok(Pat::Tuple(elems))
+        } else {
+            self.expect(&TokenKind::Punct(Punct::RParen))?;
+            Ok(first)
+        }
+    }
+
+    fn parse_record_pat_after_brace(&mut self) -> Result<Pat, ParseError> {
+        let mut fields = Vec::new();
+        if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBrace))) {
+            self.bump();
+            return Ok(Pat::Record(fields));
+        }
+        loop {
+            let name = self.expect_ident()?;
+            let pat = if matches!(self.peek(), Some(TokenKind::Op(Op::Assign))) {
+                self.bump();
+                self.parse_pat()?
+            } else {
+                Pat::Var(name.clone())
+            };
+            fields.push((name, pat));
+            if !matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                break;
+            }
+            self.bump();
+            if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBrace))) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::Punct(Punct::RBrace))?;
+        Ok(Pat::Record(fields))
     }
 
     fn parse_list_pat_after_bracket(&mut self) -> Result<Pat, ParseError> {
@@ -720,6 +756,21 @@ impl Parser {
     }
 
     fn parse_pat_atom(&mut self) -> Result<Pat, ParseError> {
+        match self.peek() {
+            Some(TokenKind::Punct(Punct::LBracket)) => {
+                self.bump();
+                return self.parse_list_pat_after_bracket();
+            }
+            Some(TokenKind::Punct(Punct::LParen)) => {
+                self.bump();
+                return self.parse_paren_pat_after_lparen();
+            }
+            Some(TokenKind::Punct(Punct::LBrace)) => {
+                self.bump();
+                return self.parse_record_pat_after_brace();
+            }
+            _ => {}
+        }
         let tok = self.bump().ok_or_else(|| ParseError::new("expected pattern atom"))?;
         match tok {
             TokenKind::Int(n) => Ok(Pat::Lit(Lit::Int(n))),
@@ -908,6 +959,7 @@ fn starts_pat_atom(tok: &TokenKind) -> bool {
             | TokenKind::Str(_)
             | TokenKind::Bool(_)
             | TokenKind::Ident(_)
+            | TokenKind::Punct(Punct::LParen | Punct::LBracket | Punct::LBrace)
     )
 }
 
