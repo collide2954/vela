@@ -28,6 +28,7 @@ pub enum Expr {
     Record(Vec<(String, Expr)>),
     RecordUpdate(Box<Expr>, Vec<(String, Expr)>),
     Series(Vec<Expr>),
+    Field(Box<Expr>, String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -337,6 +338,12 @@ impl Parser {
         };
 
         loop {
+            if matches!(self.peek(), Some(TokenKind::Op(Op::Dot))) && FIELD_BP >= min_bp {
+                self.bump();
+                let name = self.expect_ident()?;
+                lhs = Expr::Field(Box::new(lhs), name);
+                continue;
+            }
             if let Some((op, l_bp)) = self.peek().and_then(postfix_op) {
                 if l_bp < min_bp {
                     break;
@@ -419,6 +426,7 @@ impl Parser {
 }
 
 const APP_BP: u8 = 25;
+const FIELD_BP: u8 = 28;
 
 fn starts_pat_atom(tok: &TokenKind) -> bool {
     matches!(
