@@ -25,6 +25,8 @@ pub enum Expr {
     Lambda(Vec<String>, Box<Expr>),
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<MatchArm>),
+    Record(Vec<(String, Expr)>),
+    RecordUpdate(Box<Expr>, Vec<(String, Expr)>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -190,6 +192,68 @@ impl Parser {
         }
     }
 
+    fn parse_record(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBrace))) {
+            self.bump();
+            return Ok(Expr::Record(Vec::new()));
+        }
+        let first = self.parse_expr_bp(0)?;
+        match self.peek() {
+            Some(TokenKind::Keyword(Keyword::With)) => {
+                self.bump();
+                let fields = self.parse_field_list()?;
+                self.expect(&TokenKind::Punct(Punct::RBrace))?;
+                Ok(Expr::RecordUpdate(Box::new(first), fields))
+            }
+            Some(TokenKind::Op(Op::Assign)) => {
+                let name = match first {
+                    Expr::Var(n) => n,
+                    other => {
+                        return Err(ParseError::new(format!(
+                            "expected field name before `=`, found {other:?}"
+                        )));
+                    }
+                };
+                self.bump();
+                let value = self.parse_expr_bp(0)?;
+                let mut fields = vec![(name, value)];
+                while matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                    self.bump();
+                    if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBrace))) {
+                        break;
+                    }
+                    let name = self.expect_ident()?;
+                    self.expect(&TokenKind::Op(Op::Assign))?;
+                    let value = self.parse_expr_bp(0)?;
+                    fields.push((name, value));
+                }
+                self.expect(&TokenKind::Punct(Punct::RBrace))?;
+                Ok(Expr::Record(fields))
+            }
+            other => Err(ParseError::new(format!(
+                "expected `=` or `with` in record, found {other:?}"
+            ))),
+        }
+    }
+
+    fn parse_field_list(&mut self) -> Result<Vec<(String, Expr)>, ParseError> {
+        let mut fields = Vec::new();
+        loop {
+            let name = self.expect_ident()?;
+            self.expect(&TokenKind::Op(Op::Assign))?;
+            let value = self.parse_expr_bp(0)?;
+            fields.push((name, value));
+            if !matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                break;
+            }
+            self.bump();
+            if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBrace))) {
+                break;
+            }
+        }
+        Ok(fields)
+    }
+
     fn parse_pat(&mut self) -> Result<Pat, ParseError> {
         let tok = self.bump().ok_or_else(|| ParseError::new("expected pattern"))?;
         match tok {
@@ -326,6 +390,7 @@ impl Parser {
                 self.expect(&TokenKind::Punct(Punct::RParen))?;
                 Ok(inner)
             }
+            TokenKind::Punct(Punct::LBrace) => self.parse_record(),
             other => Err(ParseError::new(format!("unexpected token: {other:?}"))),
         }
     }
