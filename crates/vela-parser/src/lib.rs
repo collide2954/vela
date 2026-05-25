@@ -92,6 +92,7 @@ pub enum Pat {
     Or(Vec<Pat>),
     As(Box<Pat>, String),
     List(Vec<ListPart>),
+    Range(Box<Pat>, Box<Pat>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -657,26 +658,34 @@ impl Parser {
             return self.parse_list_pat_after_bracket();
         }
         let tok = self.bump().ok_or_else(|| ParseError::new("expected pattern"))?;
-        match tok {
-            TokenKind::Int(n) => Ok(Pat::Lit(Lit::Int(n))),
-            TokenKind::Float(f) => Ok(Pat::Lit(Lit::Float(f))),
-            TokenKind::Str(s) => Ok(Pat::Lit(Lit::Str(s))),
-            TokenKind::Bool(b) => Ok(Pat::Lit(Lit::Bool(b))),
+        let lo = match tok {
+            TokenKind::Int(n) => Pat::Lit(Lit::Int(n)),
+            TokenKind::Float(f) => Pat::Lit(Lit::Float(f)),
+            TokenKind::Str(s) => Pat::Lit(Lit::Str(s)),
+            TokenKind::Bool(b) => Pat::Lit(Lit::Bool(b)),
             TokenKind::Ident(name) => {
                 if name == "_" {
-                    Ok(Pat::Wildcard)
+                    Pat::Wildcard
                 } else if name.starts_with(|c: char| c.is_ascii_uppercase()) {
                     let mut args = Vec::new();
                     while self.peek().is_some_and(starts_pat_atom) {
                         args.push(self.parse_pat_atom()?);
                     }
-                    Ok(Pat::Cons(name, args))
+                    return Ok(Pat::Cons(name, args));
                 } else {
-                    Ok(Pat::Var(name))
+                    Pat::Var(name)
                 }
             }
-            other => Err(ParseError::new(format!("unexpected token in pattern: {other:?}"))),
+            other => {
+                return Err(ParseError::new(format!("unexpected token in pattern: {other:?}")));
+            }
+        };
+        if matches!(self.peek(), Some(TokenKind::Op(Op::DotDotEq))) {
+            self.bump();
+            let hi = self.parse_pat_atom()?;
+            return Ok(Pat::Range(Box::new(lo), Box::new(hi)));
         }
+        Ok(lo)
     }
 
     fn parse_list_pat_after_bracket(&mut self) -> Result<Pat, ParseError> {
