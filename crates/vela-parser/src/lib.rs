@@ -17,6 +17,7 @@ pub enum Expr {
     UnaryOp(UnOp, Box<Expr>),
     Postfix(PostOp, Box<Expr>),
     App(Box<Expr>, Box<Expr>),
+    Lambda(Vec<String>, Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -197,6 +198,15 @@ impl Parser {
             TokenKind::Str(s) => Ok(Expr::Lit(Lit::Str(s))),
             TokenKind::Bool(b) => Ok(Expr::Lit(Lit::Bool(b))),
             TokenKind::Ident(name) => Ok(Expr::Var(name)),
+            TokenKind::Keyword(Keyword::Fn) => {
+                let mut params = Vec::new();
+                while let Some(TokenKind::Ident(_)) = self.peek() {
+                    params.push(self.expect_ident()?);
+                }
+                self.expect(&TokenKind::Op(Op::RArrow))?;
+                let body = self.parse_expr_bp(0)?;
+                Ok(Expr::Lambda(params, Box::new(body)))
+            }
             TokenKind::Punct(Punct::LParen) => {
                 if matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
                     self.bump();
