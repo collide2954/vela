@@ -18,6 +18,7 @@ pub enum Expr {
     Postfix(PostOp, Box<Expr>),
     App(Box<Expr>, Box<Expr>),
     Lambda(Vec<String>, Box<Expr>),
+    If(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -206,6 +207,14 @@ impl Parser {
                 self.expect(&TokenKind::Op(Op::RArrow))?;
                 let body = self.parse_expr_bp(0)?;
                 Ok(Expr::Lambda(params, Box::new(body)))
+            }
+            TokenKind::Keyword(Keyword::If) => {
+                let cond = self.parse_expr_bp(0)?;
+                self.expect(&TokenKind::Keyword(Keyword::Then))?;
+                let then_b = self.parse_expr_bp(0)?;
+                self.expect(&TokenKind::Keyword(Keyword::Else))?;
+                let else_b = self.parse_expr_bp(0)?;
+                Ok(Expr::If(Box::new(cond), Box::new(then_b), Box::new(else_b)))
             }
             TokenKind::Punct(Punct::LParen) => {
                 if matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
