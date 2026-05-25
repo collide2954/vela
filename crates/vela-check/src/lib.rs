@@ -123,6 +123,7 @@ struct Ctx {
     subst: HashMap<u32, Type>,
     fresh: u32,
     sums: HashMap<String, Vec<String>>,
+    expected_return: Option<Type>,
 }
 
 impl Default for Ctx {
@@ -131,7 +132,17 @@ impl Default for Ctx {
         sums.insert("Bool".into(), vec!["true".into(), "false".into()]);
         sums.insert("Option".into(), vec!["None".into(), "Some".into()]);
         sums.insert("Result".into(), vec!["Ok".into(), "Err".into()]);
-        Self { subst: HashMap::new(), fresh: 0, sums }
+        Self { subst: HashMap::new(), fresh: 0, sums, expected_return: None }
+    }
+}
+
+impl Ctx {
+    fn enter_function(&mut self, ret: Type) -> Option<Type> {
+        std::mem::replace(&mut self.expected_return, Some(ret))
+    }
+
+    fn exit_function(&mut self, saved: Option<Type>) {
+        self.expected_return = saved;
     }
 }
 
@@ -461,8 +472,22 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                 inner_env = inner_env.extend(p.name.clone(), Scheme::mono(pt.clone()));
                 param_types.push(pt);
             }
-            let body_ty = infer(body, &inner_env, ctx)?;
-            if let Some(rt) = return_ty {
+            let body_ty = if params.is_empty() {
+                infer(body, &inner_env, ctx)?
+            } else {
+                let return_var = match return_ty {
+                    Some(rt) => translator.translate(rt, ctx)?,
+                    None => ctx.fresh_var(),
+                };
+                let saved = ctx.enter_function(return_var.clone());
+                let bt = infer(body, &inner_env, ctx)?;
+                ctx.unify(&return_var, &bt)?;
+                ctx.exit_function(saved);
+                ctx.resolve(&return_var)
+            };
+            if params.is_empty()
+                && let Some(rt) = return_ty
+            {
                 let rt_translated = translator.translate(rt, ctx)?;
                 ctx.unify(&body_ty, &rt_translated)?;
             }
@@ -557,11 +582,15 @@ fn lambda_type(
         env = env.extend(p.name.clone(), Scheme::mono(pt.clone()));
         param_types.push(pt);
     }
+    let return_ty = ctx.fresh_var();
+    let saved = ctx.enter_function(return_ty.clone());
     let body_ty = infer(body, &env, ctx)?;
+    ctx.unify(&return_ty, &body_ty)?;
+    ctx.exit_function(saved);
     Ok(param_types
         .into_iter()
         .rev()
-        .fold(body_ty, |acc, pt| Type::Fn(Box::new(pt), Box::new(acc))))
+        .fold(return_ty, |acc, pt| Type::Fn(Box::new(pt), Box::new(acc))))
 }
 
 fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
@@ -583,8 +612,17 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             let t = infer(inner, env, ctx)?;
             let a = ctx.fresh_var();
             let e = ctx.fresh_var();
-            let expected = Type::Result(Box::new(a.clone()), Box::new(e));
+            let expected = Type::Result(Box::new(a.clone()), Box::new(e.clone()));
             ctx.unify(&t, &expected)?;
+            let return_ty = ctx.expected_return.clone().ok_or_else(|| {
+                TypeError::new(
+                    "`?` requires the enclosing function to return a Result",
+                )
+            })?;
+            let outer_ok = ctx.fresh_var();
+            let expected_return =
+                Type::Result(Box::new(outer_ok), Box::new(e.clone()));
+            ctx.unify(&return_ty, &expected_return)?;
             Ok(ctx.resolve(&a))
         }
         Expr::BinOp(op, lhs, rhs) => infer_binary(*op, lhs, rhs, env, ctx),
