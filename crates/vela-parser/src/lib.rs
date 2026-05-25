@@ -12,6 +12,7 @@ pub enum Stmt {
     Let { name: String, params: Vec<String>, body: Expr },
     Var { name: String, body: Expr },
     Mutate { name: String, body: Expr },
+    For { binding: String, iter: Expr, body: Expr },
     Expr(Expr),
 }
 
@@ -192,6 +193,15 @@ impl Parser {
                 self.expect(&TokenKind::Op(Op::Assign))?;
                 let body = self.parse_body_after_block_intro()?;
                 Ok(Stmt::Var { name, body })
+            }
+            Some(TokenKind::Keyword(Keyword::For)) => {
+                self.bump();
+                let binding = self.expect_ident()?;
+                self.expect(&TokenKind::Keyword(Keyword::In))?;
+                let iter = self.parse_expr_bp(0)?;
+                self.expect(&TokenKind::Punct(Punct::Colon))?;
+                let body = self.parse_body_after_block_intro()?;
+                Ok(Stmt::For { binding, iter, body })
             }
             _ => {
                 let expr = self.parse_expr_bp(0)?;
