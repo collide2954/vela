@@ -20,6 +20,8 @@ pub enum Type {
     Tuple(Vec<Type>),
     Record(Vec<(String, Type)>),
     DataFrame,
+    Option(Box<Type>),
+    Result(Box<Type>, Box<Type>),
 }
 
 impl Type {
@@ -47,6 +49,8 @@ impl Type {
                 format!("{{ {} }}", parts.join(", "))
             }
             Type::DataFrame => "DataFrame".into(),
+            Type::Option(t) => format!("Option[{}]", t.show()),
+            Type::Result(a, e) => format!("Result[{}, {}]", a.show(), e.show()),
         }
     }
 
@@ -129,6 +133,10 @@ impl Ctx {
             Type::Record(fields) => Type::Record(
                 fields.iter().map(|(n, t)| (n.clone(), self.resolve(t))).collect(),
             ),
+            Type::Option(t) => Type::Option(Box::new(self.resolve(t))),
+            Type::Result(a, e) => {
+                Type::Result(Box::new(self.resolve(a)), Box::new(self.resolve(e)))
+            }
             other => other.clone(),
         }
     }
@@ -166,6 +174,8 @@ impl Ctx {
             Type::Series(t) => self.occurs(n, &t),
             Type::Tuple(ts) => ts.iter().any(|t| self.occurs(n, t)),
             Type::Record(fields) => fields.iter().any(|(_, t)| self.occurs(n, t)),
+            Type::Option(t) => self.occurs(n, &t),
+            Type::Result(a, e) => self.occurs(n, &a) || self.occurs(n, &e),
             _ => false,
         }
     }
@@ -205,6 +215,11 @@ impl Ctx {
                 }
                 Ok(())
             }
+            (Type::Option(a), Type::Option(b)) => self.unify(&a, &b),
+            (Type::Result(a1, e1), Type::Result(a2, e2)) => {
+                self.unify(&a1, &a2)?;
+                self.unify(&e1, &e2)
+            }
             (Type::Record(a), Type::Record(b)) => {
                 if a.len() != b.len() {
                     return Err(TypeError::new(format!(
@@ -235,7 +250,7 @@ impl Ctx {
 pub fn check_expr(src: &str) -> Result<Type, TypeError> {
     let expr = parse_expr(src).map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
     let mut ctx = Ctx::default();
-    let env = Env::new();
+    let env = prelude();
     let t = infer(&expr, &env, &mut ctx)?;
     Ok(ctx.resolve(&t))
 }
@@ -244,12 +259,61 @@ pub fn check_program(src: &str) -> Result<Type, TypeError> {
     let program = parse_program(src)
         .map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
     let mut ctx = Ctx::default();
-    let mut env = Env::new();
+    let mut env = prelude();
     let mut last = Type::Unit;
     for stmt in &program.stmts {
         last = check_stmt(stmt, &mut env, &mut ctx)?;
     }
     Ok(ctx.resolve(&last))
+}
+
+fn prelude() -> Env {
+    let mut env = Env::new();
+    // None : forall a. Option a
+    env = env.extend(
+        "None".into(),
+        Scheme { vars: vec![0], ty: Type::Option(Box::new(Type::Var(0))) },
+    );
+    // Some : forall a. a -> Option a
+    env = env.extend(
+        "Some".into(),
+        Scheme {
+            vars: vec![0],
+            ty: Type::Fn(
+                Box::new(Type::Var(0)),
+                Box::new(Type::Option(Box::new(Type::Var(0)))),
+            ),
+        },
+    );
+    // Ok : forall a e. a -> Result a e
+    env = env.extend(
+        "Ok".into(),
+        Scheme {
+            vars: vec![0, 1],
+            ty: Type::Fn(
+                Box::new(Type::Var(0)),
+                Box::new(Type::Result(
+                    Box::new(Type::Var(0)),
+                    Box::new(Type::Var(1)),
+                )),
+            ),
+        },
+    );
+    // Err : forall a e. e -> Result a e
+    env = env.extend(
+        "Err".into(),
+        Scheme {
+            vars: vec![0, 1],
+            ty: Type::Fn(
+                Box::new(Type::Var(1)),
+                Box::new(Type::Result(
+                    Box::new(Type::Var(0)),
+                    Box::new(Type::Var(1)),
+                )),
+            ),
+        },
+    );
+    env
 }
 
 fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
@@ -517,6 +581,10 @@ fn apply_subst(ty: &Type, subst: &HashMap<u32, Type>) -> Type {
         Type::Record(fs) => Type::Record(
             fs.iter().map(|(n, t)| (n.clone(), apply_subst(t, subst))).collect(),
         ),
+        Type::Option(t) => Type::Option(Box::new(apply_subst(t, subst))),
+        Type::Result(a, e) => {
+            Type::Result(Box::new(apply_subst(a, subst)), Box::new(apply_subst(e, subst)))
+        }
         other => other.clone(),
     }
 }
@@ -540,6 +608,11 @@ fn collect_ftv(ty: &Type, ctx: &Ctx, out: &mut std::collections::BTreeSet<u32>) 
             for (_, t) in &fs {
                 collect_ftv(t, ctx, out);
             }
+        }
+        Type::Option(t) => collect_ftv(&t, ctx, out),
+        Type::Result(a, e) => {
+            collect_ftv(&a, ctx, out);
+            collect_ftv(&e, ctx, out);
         }
         _ => {}
     }
