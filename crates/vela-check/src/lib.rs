@@ -254,16 +254,39 @@ pub fn check_program(src: &str) -> Result<Type, TypeError> {
 
 fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
     match stmt {
-        Stmt::Let { name, params, body, .. } if params.is_empty() => {
-            let ty = infer(body, env, ctx)?;
+        Stmt::Let { name, params, return_ty, body } => {
+            let mut translator = TyTranslator::new();
+            let mut inner_env = env.clone();
+            let mut param_types = Vec::with_capacity(params.len());
+            for p in params {
+                let pt = match &p.ty {
+                    Some(ty) => translator.translate(ty, ctx)?,
+                    None => ctx.fresh_var(),
+                };
+                inner_env = inner_env.extend(p.name.clone(), Scheme::mono(pt.clone()));
+                param_types.push(pt);
+            }
+            let body_ty = infer(body, &inner_env, ctx)?;
+            if let Some(rt) = return_ty {
+                let rt_translated = translator.translate(rt, ctx)?;
+                ctx.unify(&body_ty, &rt_translated)?;
+            }
+            let ty = param_types.into_iter().rev().fold(body_ty, |acc, pt| {
+                Type::Fn(Box::new(pt), Box::new(acc))
+            });
             let scheme = ctx.generalize(env, &ty);
             *env = env.extend(name.clone(), scheme);
             Ok(Type::Unit)
         }
-        Stmt::Let { name, params, body, .. } => {
-            let lambda = lambda_type(params, body, env, ctx)?;
-            let scheme = ctx.generalize(env, &lambda);
-            *env = env.extend(name.clone(), scheme);
+        Stmt::Var { name, ty, body } => {
+            let body_ty = infer(body, env, ctx)?;
+            if let Some(annotation) = ty {
+                let mut translator = TyTranslator::new();
+                let annotation_ty = translator.translate(annotation, ctx)?;
+                ctx.unify(&body_ty, &annotation_ty)?;
+            }
+            let resolved = ctx.resolve(&body_ty);
+            *env = env.extend(name.clone(), Scheme::mono(resolved));
             Ok(Type::Unit)
         }
         Stmt::Expr(e) => infer(e, env, ctx),
@@ -421,6 +444,65 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             Ok(ctx.resolve(&result_ty))
         }
         other => Err(TypeError::new(format!("cannot yet infer type of {other:?}"))),
+    }
+}
+
+struct TyTranslator {
+    named_vars: HashMap<String, Type>,
+}
+
+impl TyTranslator {
+    fn new() -> Self {
+        Self { named_vars: HashMap::new() }
+    }
+
+    fn translate(
+        &mut self,
+        ty: &vela_parser::Ty,
+        ctx: &mut Ctx,
+    ) -> Result<Type, TypeError> {
+        match ty {
+            vela_parser::Ty::Unit => Ok(Type::Unit),
+            vela_parser::Ty::Con(name) => match name.as_str() {
+                "Int" => Ok(Type::Int),
+                "UInt" => Ok(Type::UInt),
+                "BigInt" => Ok(Type::BigInt),
+                "Float" => Ok(Type::Float),
+                "Decimal" => Ok(Type::Decimal),
+                "Bool" => Ok(Type::Bool),
+                "String" => Ok(Type::String),
+                "Symbol" => Ok(Type::Symbol),
+                "DataFrame" => Ok(Type::DataFrame),
+                other => Err(TypeError::new(format!("unknown type: {other}"))),
+            },
+            vela_parser::Ty::Var(name) => {
+                if let Some(t) = self.named_vars.get(name) {
+                    Ok(t.clone())
+                } else {
+                    let v = ctx.fresh_var();
+                    self.named_vars.insert(name.clone(), v.clone());
+                    Ok(v)
+                }
+            }
+            vela_parser::Ty::Series(t) => {
+                Ok(Type::Series(Box::new(self.translate(t, ctx)?)))
+            }
+            vela_parser::Ty::Tuple(ts) => {
+                let mut translated = Vec::with_capacity(ts.len());
+                for t in ts {
+                    translated.push(self.translate(t, ctx)?);
+                }
+                Ok(Type::Tuple(translated))
+            }
+            vela_parser::Ty::Record(fields) => {
+                let mut translated = Vec::with_capacity(fields.len());
+                for (n, t) in fields {
+                    translated.push((n.clone(), self.translate(t, ctx)?));
+                }
+                Ok(Type::Record(translated))
+            }
+            other => Err(TypeError::new(format!("cannot translate type: {other:?}"))),
+        }
     }
 }
 
