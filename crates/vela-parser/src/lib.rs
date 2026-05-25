@@ -80,6 +80,7 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
     pub pat: Pat,
+    pub guard: Option<Expr>,
     pub body: Expr,
 }
 
@@ -872,9 +873,15 @@ impl Parser {
                 while matches!(self.peek(), Some(TokenKind::Punct(Punct::Bar))) {
                     self.bump();
                     let pat = self.parse_arm_pat()?;
+                    let guard = if matches!(self.peek(), Some(TokenKind::Keyword(Keyword::When))) {
+                        self.bump();
+                        Some(self.parse_expr_bp(0)?)
+                    } else {
+                        None
+                    };
                     self.expect(&TokenKind::Op(Op::RArrow))?;
                     let body = self.parse_expr_bp(0)?;
-                    arms.push(MatchArm { pat, body });
+                    arms.push(MatchArm { pat, guard, body });
                     self.skip_newlines();
                 }
                 if arms.is_empty() {
