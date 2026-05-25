@@ -1,0 +1,14 @@
+[package]
+name         = "vela-check"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+
+[dependencies]
+vela-lexer  = { path = "../vela-lexer" }
+vela-parser = { path = "../vela-parser" }
+
+[lints]
+workspace = true
