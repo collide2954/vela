@@ -1,4 +1,4 @@
-use vela_parser::{BinOp, Expr, Lit, Stmt, parse_stmt};
+use vela_parser::{Expr, Lit, Stmt, parse_stmt};
 
 fn s(src: &str) -> Stmt {
     parse_stmt(src).expect("parses")
