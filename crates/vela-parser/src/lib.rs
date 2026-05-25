@@ -29,6 +29,7 @@ pub enum Expr {
     RecordUpdate(Box<Expr>, Vec<(String, Expr)>),
     Series(Vec<Expr>),
     Field(Box<Expr>, String),
+    Tuple(Vec<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -414,9 +415,22 @@ impl Parser {
                     self.bump();
                     return Ok(Expr::Lit(Lit::Unit));
                 }
-                let inner = self.parse_expr_bp(0)?;
-                self.expect(&TokenKind::Punct(Punct::RParen))?;
-                Ok(inner)
+                let first = self.parse_expr_bp(0)?;
+                if matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                    let mut elems = vec![first];
+                    while matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                        self.bump();
+                        if matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
+                            break;
+                        }
+                        elems.push(self.parse_expr_bp(0)?);
+                    }
+                    self.expect(&TokenKind::Punct(Punct::RParen))?;
+                    Ok(Expr::Tuple(elems))
+                } else {
+                    self.expect(&TokenKind::Punct(Punct::RParen))?;
+                    Ok(first)
+                }
             }
             TokenKind::Punct(Punct::LBrace) => self.parse_record(),
             TokenKind::Punct(Punct::LBracket) => self.parse_series(),
