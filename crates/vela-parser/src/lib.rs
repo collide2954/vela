@@ -3,6 +3,11 @@
 use vela_lexer::{Keyword, Op, Punct, TokenKind, lex};
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Program {
+    pub stmts: Vec<Stmt>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Let { name: String, params: Vec<String>, body: Expr },
     Var { name: String, body: Expr },
@@ -90,7 +95,9 @@ impl ParseError {
 
 pub fn parse_expr(src: &str) -> Result<Expr, ParseError> {
     let mut p = Parser::new(src);
+    p.skip_newlines();
     let expr = p.parse_expr_bp(0)?;
+    p.skip_newlines();
     if let Some(tok) = p.peek() {
         return Err(ParseError::new(format!("trailing token {tok:?}")));
     }
@@ -100,10 +107,23 @@ pub fn parse_expr(src: &str) -> Result<Expr, ParseError> {
 pub fn parse_stmt(src: &str) -> Result<Stmt, ParseError> {
     let mut p = Parser::new(src);
     let stmt = p.parse_stmt()?;
+    p.skip_newlines();
     if let Some(tok) = p.peek() {
         return Err(ParseError::new(format!("trailing token {tok:?}")));
     }
     Ok(stmt)
+}
+
+pub fn parse_program(src: &str) -> Result<Program, ParseError> {
+    let mut p = Parser::new(src);
+    let mut stmts = Vec::new();
+    p.skip_newlines();
+    while p.peek().is_some() {
+        let stmt = p.parse_stmt()?;
+        stmts.push(stmt);
+        p.skip_newlines();
+    }
+    Ok(Program { stmts })
 }
 
 struct Parser {
@@ -115,9 +135,15 @@ impl Parser {
     fn new(src: &str) -> Self {
         let tokens = lex(src)
             .map(|t| t.kind)
-            .filter(|k| !matches!(k, TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent))
+            .filter(|k| !matches!(k, TokenKind::Indent | TokenKind::Dedent))
             .collect();
         Self { tokens, pos: 0 }
+    }
+
+    fn skip_newlines(&mut self) {
+        while matches!(self.peek(), Some(TokenKind::Newline)) {
+            self.pos += 1;
+        }
     }
 
     fn peek(&self) -> Option<&TokenKind> {
