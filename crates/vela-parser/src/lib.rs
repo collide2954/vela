@@ -13,7 +13,38 @@ pub enum Stmt {
     Var { name: String, body: Expr },
     Mutate { name: String, body: Expr },
     For { binding: String, iter: Expr, body: Expr },
+    TypeDecl(TypeDecl),
     Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeDecl {
+    pub name: String,
+    pub params: Vec<String>,
+    pub body: TypeDeclBody,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum TypeDeclBody {
+    Sum(Vec<TypeVariant>),
+    Alias(Ty),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeVariant {
+    pub name: String,
+    pub args: Vec<Ty>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Ty {
+    Unit,
+    Con(String),
+    Var(String),
+    App(Box<Ty>, Vec<Ty>),
+    Record(Vec<(String, Ty)>),
+    Series(Box<Ty>),
+    Tuple(Vec<Ty>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -203,6 +234,18 @@ impl Parser {
                 let body = self.parse_body_after_block_intro()?;
                 Ok(Stmt::For { binding, iter, body })
             }
+            Some(TokenKind::Keyword(Keyword::Type)) => {
+                self.bump();
+                let name = self.expect_ident()?;
+                let mut params = Vec::new();
+                while matches!(self.peek(), Some(TokenKind::Punct(Punct::Tick))) {
+                    self.bump();
+                    params.push(self.expect_ident()?);
+                }
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let body = self.parse_type_decl_body()?;
+                Ok(Stmt::TypeDecl(TypeDecl { name, params, body }))
+            }
             _ => {
                 let expr = self.parse_expr_bp(0)?;
                 if matches!(self.peek(), Some(TokenKind::Op(Op::LArrow))) {
@@ -219,6 +262,140 @@ impl Parser {
                 }
             }
         }
+    }
+
+    fn parse_type_decl_body(&mut self) -> Result<TypeDeclBody, ParseError> {
+        self.skip_newlines();
+        let dedent_pending = matches!(self.peek(), Some(TokenKind::Indent));
+        if dedent_pending {
+            self.bump();
+            self.skip_newlines();
+        }
+        let body = match self.peek() {
+            Some(TokenKind::Punct(Punct::Bar)) => {
+                TypeDeclBody::Sum(self.parse_sum_variants()?)
+            }
+            Some(TokenKind::Ident(name)) if starts_with_uppercase(name) => {
+                let variant = self.parse_variant_no_bar()?;
+                TypeDeclBody::Sum(vec![variant])
+            }
+            _ => TypeDeclBody::Alias(self.parse_type()?),
+        };
+        self.skip_newlines();
+        if dedent_pending && matches!(self.peek(), Some(TokenKind::Dedent)) {
+            self.bump();
+        }
+        Ok(body)
+    }
+
+    fn parse_sum_variants(&mut self) -> Result<Vec<TypeVariant>, ParseError> {
+        let mut variants = Vec::new();
+        while matches!(self.peek(), Some(TokenKind::Punct(Punct::Bar))) {
+            self.bump();
+            variants.push(self.parse_variant_no_bar()?);
+            self.skip_newlines();
+        }
+        Ok(variants)
+    }
+
+    fn parse_variant_no_bar(&mut self) -> Result<TypeVariant, ParseError> {
+        let name = self.expect_ident()?;
+        if !starts_with_uppercase(&name) {
+            return Err(ParseError::new(format!(
+                "variant name must begin with uppercase, found `{name}`"
+            )));
+        }
+        let mut args = Vec::new();
+        while self.peek().is_some_and(starts_type_atom) {
+            args.push(self.parse_type_atom()?);
+        }
+        Ok(TypeVariant { name, args })
+    }
+
+    fn parse_type(&mut self) -> Result<Ty, ParseError> {
+        let mut t = self.parse_type_atom()?;
+        while self.peek().is_some_and(starts_type_atom) {
+            let arg = self.parse_type_atom()?;
+            t = match t {
+                Ty::App(base, mut args) => {
+                    args.push(arg);
+                    Ty::App(base, args)
+                }
+                _ => Ty::App(Box::new(t), vec![arg]),
+            };
+        }
+        Ok(t)
+    }
+
+    fn parse_type_atom(&mut self) -> Result<Ty, ParseError> {
+        match self.peek() {
+            Some(TokenKind::Ident(_)) => {
+                let name = self.expect_ident()?;
+                Ok(Ty::Con(name))
+            }
+            Some(TokenKind::Punct(Punct::Tick)) => {
+                self.bump();
+                let name = self.expect_ident()?;
+                Ok(Ty::Var(name))
+            }
+            Some(TokenKind::Punct(Punct::LParen)) => {
+                self.bump();
+                if matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
+                    self.bump();
+                    return Ok(Ty::Unit);
+                }
+                let first = self.parse_type()?;
+                if matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                    let mut elems = vec![first];
+                    while matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                        self.bump();
+                        if matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
+                            break;
+                        }
+                        elems.push(self.parse_type()?);
+                    }
+                    self.expect(&TokenKind::Punct(Punct::RParen))?;
+                    Ok(Ty::Tuple(elems))
+                } else {
+                    self.expect(&TokenKind::Punct(Punct::RParen))?;
+                    Ok(first)
+                }
+            }
+            Some(TokenKind::Punct(Punct::LBrace)) => {
+                self.bump();
+                let fields = self.parse_type_record_fields()?;
+                self.expect(&TokenKind::Punct(Punct::RBrace))?;
+                Ok(Ty::Record(fields))
+            }
+            Some(TokenKind::Punct(Punct::LBracket)) => {
+                self.bump();
+                let inner = self.parse_type()?;
+                self.expect(&TokenKind::Punct(Punct::RBracket))?;
+                Ok(Ty::Series(Box::new(inner)))
+            }
+            other => Err(ParseError::new(format!("expected type, found {other:?}"))),
+        }
+    }
+
+    fn parse_type_record_fields(&mut self) -> Result<Vec<(String, Ty)>, ParseError> {
+        let mut fields = Vec::new();
+        if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBrace))) {
+            return Ok(fields);
+        }
+        loop {
+            let name = self.expect_ident()?;
+            self.expect(&TokenKind::Punct(Punct::Colon))?;
+            let ty = self.parse_type()?;
+            fields.push((name, ty));
+            if !matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                break;
+            }
+            self.bump();
+            if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBrace))) {
+                break;
+            }
+        }
+        Ok(fields)
     }
 
     fn parse_body_after_block_intro(&mut self) -> Result<Expr, ParseError> {
@@ -548,6 +725,20 @@ impl Parser {
 
 const APP_BP: u8 = 25;
 const FIELD_BP: u8 = 28;
+
+fn starts_with_uppercase(s: &str) -> bool {
+    s.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+}
+
+fn starts_type_atom(tok: &TokenKind) -> bool {
+    matches!(
+        tok,
+        TokenKind::Ident(_)
+            | TokenKind::Punct(
+                Punct::Tick | Punct::LParen | Punct::LBrace | Punct::LBracket,
+            )
+    )
+}
 
 fn flatten_block(mut stmts: Vec<Stmt>) -> Expr {
     if stmts.len() == 1 && matches!(stmts[0], Stmt::Expr(_)) {
