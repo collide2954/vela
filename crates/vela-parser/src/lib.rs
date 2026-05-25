@@ -17,6 +17,9 @@ pub enum Stmt {
     TraitDecl(TraitDecl),
     Impl(ImplBlock),
     Tests(Vec<TestCase>),
+    Extern { abi: String, signatures: Vec<TraitMethodSig> },
+    Input { name: String, body: Expr },
+    Output { name: String, body: Expr },
     Import { path: Vec<String>, kind: ImportKind, public: bool },
     Expr(Expr),
 }
@@ -131,6 +134,9 @@ pub enum Expr {
     ArrayLit(Vec<Vec<Expr>>),
     Sym(String),
     Block { stmts: Vec<Stmt>, trailing: Option<Box<Expr>> },
+    Scope(Box<Expr>),
+    Spawn(Box<Expr>),
+    AppBlock(Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -353,6 +359,27 @@ impl Parser {
                 self.expect(&TokenKind::Op(Op::Assign))?;
                 let cases = self.parse_test_cases()?;
                 Ok(Stmt::Tests(cases))
+            }
+            Some(TokenKind::Keyword(Keyword::Extern)) => {
+                self.bump();
+                let abi = self.expect_string()?;
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let signatures = self.parse_trait_methods()?;
+                Ok(Stmt::Extern { abi, signatures })
+            }
+            Some(TokenKind::Keyword(Keyword::Input)) => {
+                self.bump();
+                let name = self.expect_ident()?;
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let body = self.parse_expr_bp(0)?;
+                Ok(Stmt::Input { name, body })
+            }
+            Some(TokenKind::Keyword(Keyword::Output)) => {
+                self.bump();
+                let name = self.expect_ident()?;
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let body = self.parse_expr_bp(0)?;
+                Ok(Stmt::Output { name, body })
             }
             Some(TokenKind::Keyword(Keyword::Trait)) => {
                 self.bump();
@@ -1146,6 +1173,20 @@ impl Parser {
                 self.expect(&TokenKind::Keyword(Keyword::Else))?;
                 let else_b = self.parse_expr_bp(0)?;
                 Ok(Expr::If(Box::new(cond), Box::new(then_b), Box::new(else_b)))
+            }
+            TokenKind::Keyword(Keyword::Scope) => {
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let body = self.parse_body_after_block_intro()?;
+                Ok(Expr::Scope(Box::new(body)))
+            }
+            TokenKind::Keyword(Keyword::Spawn) => {
+                let inner = self.parse_expr_bp(0)?;
+                Ok(Expr::Spawn(Box::new(inner)))
+            }
+            TokenKind::Keyword(Keyword::App) => {
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let body = self.parse_body_after_block_intro()?;
+                Ok(Expr::AppBlock(Box::new(body)))
             }
             TokenKind::Keyword(Keyword::Match) => {
                 let scrut = self.parse_expr_bp(0)?;
