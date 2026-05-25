@@ -520,6 +520,25 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             }
             Ok(Type::Unit)
         }
+        Stmt::Mutate { name, body } => {
+            let var_scheme = env
+                .lookup(name)
+                .cloned()
+                .ok_or_else(|| TypeError::new(format!("unbound name: {name}")))?;
+            let var_ty = ctx.instantiate(&var_scheme);
+            let body_ty = infer(body, env, ctx)?;
+            ctx.unify(&var_ty, &body_ty)?;
+            Ok(Type::Unit)
+        }
+        Stmt::For { binding, iter, body } => {
+            let iter_ty = infer(iter, env, ctx)?;
+            let elem_ty = ctx.fresh_var();
+            ctx.unify(&iter_ty, &Type::Series(Box::new(elem_ty.clone())))?;
+            let body_env = env.extend(binding.clone(), Scheme::mono(elem_ty));
+            let body_ty = infer(body, &body_env, ctx)?;
+            ctx.unify(&body_ty, &Type::Unit)?;
+            Ok(Type::Unit)
+        }
         Stmt::Expr(e) => infer(e, env, ctx),
         other => Err(TypeError::new(format!("cannot yet check {other:?}"))),
     }
