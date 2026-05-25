@@ -14,8 +14,39 @@ pub enum Stmt {
     Mutate { name: String, body: Expr },
     For { binding: String, iter: Expr, body: Expr },
     TypeDecl(TypeDecl),
+    TraitDecl(TraitDecl),
+    Impl(ImplBlock),
     Import { path: Vec<String>, kind: ImportKind, public: bool },
     Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitDecl {
+    pub name: String,
+    pub type_var: String,
+    pub methods: Vec<TraitMethodSig>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TraitMethodSig {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub return_ty: Ty,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImplBlock {
+    pub trait_name: String,
+    pub ty: Ty,
+    pub methods: Vec<ImplMethod>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImplMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub return_ty: Option<Ty>,
+    pub body: Expr,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -310,6 +341,22 @@ impl Parser {
                 }
             }
             Some(TokenKind::Keyword(Keyword::Import)) => self.parse_import(false),
+            Some(TokenKind::Keyword(Keyword::Trait)) => {
+                self.bump();
+                let name = self.expect_ident()?;
+                let type_var = self.expect_ident()?;
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let methods = self.parse_trait_methods()?;
+                Ok(Stmt::TraitDecl(TraitDecl { name, type_var, methods }))
+            }
+            Some(TokenKind::Keyword(Keyword::Impl)) => {
+                self.bump();
+                let trait_name = self.expect_ident()?;
+                let ty = self.parse_type_atom()?;
+                self.expect(&TokenKind::Op(Op::Assign))?;
+                let methods = self.parse_impl_methods()?;
+                Ok(Stmt::Impl(ImplBlock { trait_name, ty, methods }))
+            }
             Some(TokenKind::Keyword(Keyword::Type)) => {
                 self.bump();
                 let name = self.expect_ident()?;
@@ -338,6 +385,92 @@ impl Parser {
                 }
             }
         }
+    }
+
+    fn parse_trait_methods(&mut self) -> Result<Vec<TraitMethodSig>, ParseError> {
+        self.skip_newlines();
+        let dedent_pending = matches!(self.peek(), Some(TokenKind::Indent));
+        if dedent_pending {
+            self.bump();
+            self.skip_newlines();
+        }
+        let mut methods = Vec::new();
+        while matches!(self.peek(), Some(TokenKind::Keyword(Keyword::Fn))) {
+            self.bump();
+            let name = self.expect_ident()?;
+            let params = self.parse_typed_param_list()?;
+            self.expect(&TokenKind::Punct(Punct::Colon))?;
+            let return_ty = self.parse_type()?;
+            methods.push(TraitMethodSig { name, params, return_ty });
+            self.skip_newlines();
+        }
+        if dedent_pending && matches!(self.peek(), Some(TokenKind::Dedent)) {
+            self.bump();
+        }
+        Ok(methods)
+    }
+
+    fn parse_impl_methods(&mut self) -> Result<Vec<ImplMethod>, ParseError> {
+        self.skip_newlines();
+        let dedent_pending = matches!(self.peek(), Some(TokenKind::Indent));
+        if dedent_pending {
+            self.bump();
+            self.skip_newlines();
+        }
+        let mut methods = Vec::new();
+        while matches!(self.peek(), Some(TokenKind::Keyword(Keyword::Fn))) {
+            self.bump();
+            let name = self.expect_ident()?;
+            let mut params = Vec::new();
+            loop {
+                match self.peek() {
+                    Some(TokenKind::Ident(_)) => {
+                        let n = self.expect_ident()?;
+                        params.push(Param { name: n, ty: None });
+                    }
+                    Some(TokenKind::Punct(Punct::LParen)) => {
+                        let save = self.pos;
+                        self.bump();
+                        if let Some(p) = self.try_typed_param() {
+                            params.push(p);
+                        } else {
+                            self.pos = save;
+                            break;
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            let return_ty = if matches!(self.peek(), Some(TokenKind::Punct(Punct::Colon))) {
+                self.bump();
+                Some(self.parse_type()?)
+            } else {
+                None
+            };
+            self.expect(&TokenKind::Op(Op::Assign))?;
+            let body = self.parse_body_after_block_intro()?;
+            methods.push(ImplMethod { name, params, return_ty, body });
+            self.skip_newlines();
+        }
+        if dedent_pending && matches!(self.peek(), Some(TokenKind::Dedent)) {
+            self.bump();
+        }
+        Ok(methods)
+    }
+
+    fn parse_typed_param_list(&mut self) -> Result<Vec<Param>, ParseError> {
+        let mut params = Vec::new();
+        while matches!(self.peek(), Some(TokenKind::Punct(Punct::LParen))) {
+            let save = self.pos;
+            self.bump();
+            if let Some(p) = self.try_typed_param() {
+                params.push(p);
+            } else {
+                self.pos = save;
+                break;
+            }
+        }
+        Ok(params)
     }
 
     fn try_typed_param(&mut self) -> Option<Param> {
