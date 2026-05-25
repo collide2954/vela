@@ -11,6 +11,7 @@ pub struct Program {
 pub enum Stmt {
     Let { name: String, params: Vec<String>, body: Expr },
     Var { name: String, body: Expr },
+    Mutate { name: String, body: Expr },
     Expr(Expr),
 }
 
@@ -194,7 +195,21 @@ impl Parser {
                 let body = self.parse_expr_bp(0)?;
                 Ok(Stmt::Var { name, body })
             }
-            _ => Ok(Stmt::Expr(self.parse_expr_bp(0)?)),
+            _ => {
+                let expr = self.parse_expr_bp(0)?;
+                if matches!(self.peek(), Some(TokenKind::Op(Op::LArrow))) {
+                    self.bump();
+                    let value = self.parse_expr_bp(0)?;
+                    match expr {
+                        Expr::Var(name) => Ok(Stmt::Mutate { name, body: value }),
+                        other => Err(ParseError::new(format!(
+                            "expected variable name on left of `<-`, found {other:?}"
+                        ))),
+                    }
+                } else {
+                    Ok(Stmt::Expr(expr))
+                }
+            }
         }
     }
 
