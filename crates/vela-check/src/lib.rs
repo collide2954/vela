@@ -722,9 +722,58 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             Ok(Type::Unit)
         }
         Stmt::Expr(e) => infer(e, env, ctx),
-        Stmt::TraitDecl(_)
-        | Stmt::Impl(_)
-        | Stmt::Tests(_)
+        Stmt::TraitDecl(decl) => {
+            let mut translator = TyTranslator::new();
+            let tv_id = ctx.fresh_id();
+            translator
+                .named_vars
+                .insert(decl.type_var.clone(), Type::Var(tv_id));
+            for method in &decl.methods {
+                let return_ty = translator.translate(&method.return_ty, ctx)?;
+                let mut ty = return_ty;
+                for p in method.params.iter().rev() {
+                    let pt = match &p.ty {
+                        Some(t) => translator.translate(t, ctx)?,
+                        None => {
+                            return Err(TypeError::new(
+                                "trait method parameters must be annotated",
+                            ));
+                        }
+                    };
+                    ty = Type::Fn(Box::new(pt), Box::new(ty));
+                }
+                let scheme = Scheme { vars: vec![tv_id], ty };
+                *env = env.extend(method.name.clone(), scheme);
+            }
+            Ok(Type::Unit)
+        }
+        Stmt::Impl(block) => {
+            let mut translator = TyTranslator::new();
+            let target_ty = translator.translate(&block.ty, ctx)?;
+            for method in &block.methods {
+                let mut inner_env = env.clone();
+                let mut param_types = Vec::with_capacity(method.params.len());
+                for p in &method.params {
+                    let pt = match &p.ty {
+                        Some(t) => translator.translate(t, ctx)?,
+                        None => ctx.fresh_var(),
+                    };
+                    inner_env = inner_env.extend(p.name.clone(), Scheme::mono(pt.clone()));
+                    param_types.push(pt);
+                }
+                let return_var = match &method.return_ty {
+                    Some(rt) => translator.translate(rt, ctx)?,
+                    None => ctx.fresh_var(),
+                };
+                let saved = ctx.enter_function(return_var.clone());
+                let bt = infer(&method.body, &inner_env, ctx)?;
+                ctx.unify(&return_var, &bt)?;
+                ctx.exit_function(saved);
+                let _ = (target_ty.clone(), param_types);
+            }
+            Ok(Type::Unit)
+        }
+        Stmt::Tests(_)
         | Stmt::Extern { .. }
         | Stmt::Import { .. } => Ok(Type::Unit),
         Stmt::Input { name, body } | Stmt::Output { name, body } => {
@@ -999,6 +1048,11 @@ impl TyTranslator {
         args: &[vela_parser::Ty],
         ctx: &mut Ctx,
     ) -> Result<Type, TypeError> {
+        if args.is_empty()
+            && let Some(t) = self.named_vars.get(name)
+        {
+            return Ok(t.clone());
+        }
         let translated_args: Result<Vec<Type>, TypeError> = args
             .iter()
             .filter(|a| !matches!(a, vela_parser::Ty::Con(n) if n == "_dim"))
