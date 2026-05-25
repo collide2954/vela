@@ -362,7 +362,7 @@ impl Parser {
                 if matches!(self.peek(), Some(TokenKind::Keyword(Keyword::Import))) {
                     self.parse_import(true)
                 } else {
-                    Err(ParseError::new("`pub` only modifies `import` for now"))
+                    self.parse_stmt()
                 }
             }
             Some(TokenKind::Keyword(Keyword::Import)) => self.parse_import(false),
