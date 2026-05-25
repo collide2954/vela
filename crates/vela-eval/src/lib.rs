@@ -1,8 +1,11 @@
 //! Tree-walking evaluator for the Vela language.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use vela_parser::{BinOp, Expr, Lit, Param, Stmt, UnOp, parse_program};
+use vela_parser::{
+    BinOp, Expr, ListPart, Lit, Param, Pat, Stmt, TypeDeclBody, UnOp, parse_program,
+};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -49,7 +52,7 @@ impl std::fmt::Debug for BuiltinFn {
 
 #[derive(Debug, Clone, Default)]
 pub struct Env {
-    bindings: HashMap<String, Value>,
+    frames: Vec<Rc<RefCell<HashMap<String, Value>>>>,
 }
 
 impl Env {
@@ -58,13 +61,30 @@ impl Env {
     }
 
     fn extend(&self, name: String, value: Value) -> Env {
-        let mut bindings = self.bindings.clone();
-        bindings.insert(name, value);
-        Env { bindings }
+        let mut map = HashMap::new();
+        map.insert(name, value);
+        let mut frames = self.frames.clone();
+        frames.push(Rc::new(RefCell::new(map)));
+        Env { frames }
     }
 
-    fn lookup(&self, name: &str) -> Option<&Value> {
-        self.bindings.get(name)
+    fn lookup(&self, name: &str) -> Option<Value> {
+        for frame in self.frames.iter().rev() {
+            if let Some(v) = frame.borrow().get(name) {
+                return Some(v.clone());
+            }
+        }
+        None
+    }
+
+    fn mutate(&self, name: &str, value: Value) -> bool {
+        for frame in self.frames.iter().rev() {
+            if frame.borrow().contains_key(name) {
+                frame.borrow_mut().insert(name.into(), value);
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -106,7 +126,31 @@ fn prelude() -> Env {
             Ok(Value::Unit)
         }))),
     );
+    env = env.extend("None".into(), Value::Cons("None".into(), vec![]));
+    env = env.extend("Some".into(), make_constructor("Some".into(), 1));
+    env = env.extend("Ok".into(), make_constructor("Ok".into(), 1));
+    env = env.extend("Err".into(), make_constructor("Err".into(), 1));
     env
+}
+
+fn make_constructor(name: String, arity: usize) -> Value {
+    if arity == 0 {
+        Value::Cons(name, Vec::new())
+    } else {
+        make_curried_cons(name, arity, Vec::new())
+    }
+}
+
+fn make_curried_cons(name: String, arity: usize, collected: Vec<Value>) -> Value {
+    if collected.len() == arity {
+        return Value::Cons(name, collected);
+    }
+    let name_c = name.clone();
+    Value::Builtin(BuiltinFn(Rc::new(move |arg| {
+        let mut next = collected.clone();
+        next.push(arg);
+        Ok(make_curried_cons(name_c.clone(), arity, next))
+    })))
 }
 
 pub fn show(v: &Value) -> String {
@@ -164,8 +208,158 @@ fn eval_stmt(stmt: &Stmt, env: &mut Env) -> Result<Value, RuntimeError> {
             *env = env.extend(name.clone(), value);
             Ok(Value::Unit)
         }
+        Stmt::TypeDecl(decl) => {
+            if let TypeDeclBody::Sum(variants) = &decl.body {
+                for v in variants {
+                    *env = env
+                        .extend(v.name.clone(), make_constructor(v.name.clone(), v.args.len()));
+                }
+            }
+            Ok(Value::Unit)
+        }
+        Stmt::For { binding, iter, body } => {
+            let iter_v = eval(iter, env)?;
+            match iter_v {
+                Value::Series(vs) => {
+                    for v in vs {
+                        let inner = env.extend(binding.clone(), v);
+                        eval(body, &inner)?;
+                    }
+                    Ok(Value::Unit)
+                }
+                other => Err(RuntimeError::new(format!(
+                    "for-loop iter must be a series, got {}",
+                    show(&other)
+                ))),
+            }
+        }
+        Stmt::Mutate { name, body } => {
+            let value = eval(body, env)?;
+            if !env.mutate(name, value) {
+                return Err(RuntimeError::new(format!("unbound: {name}")));
+            }
+            Ok(Value::Unit)
+        }
+        Stmt::Destructure { pat, body } => {
+            let value = eval(body, env)?;
+            match match_pat(pat, &value) {
+                Some(bindings) => {
+                    for (n, v) in bindings {
+                        *env = env.extend(n, v);
+                    }
+                    Ok(Value::Unit)
+                }
+                None => Err(RuntimeError::new(format!(
+                    "pattern did not match {}",
+                    show(&value)
+                ))),
+            }
+        }
         Stmt::Expr(e) => eval(e, env),
-        other => Err(RuntimeError::new(format!("cannot yet evaluate {other:?}"))),
+        Stmt::TraitDecl(_)
+        | Stmt::Impl(_)
+        | Stmt::Tests(_)
+        | Stmt::Extern { .. }
+        | Stmt::Import { .. }
+        | Stmt::Input { .. }
+        | Stmt::Output { .. } => Ok(Value::Unit),
+    }
+}
+
+fn match_pat(pat: &Pat, value: &Value) -> Option<Vec<(String, Value)>> {
+    match (pat, value) {
+        (Pat::Wildcard, _) => Some(Vec::new()),
+        (Pat::Var(name), v) => Some(vec![(name.clone(), v.clone())]),
+        (Pat::Lit(Lit::Int(p)), Value::Int(v)) if p == v => Some(Vec::new()),
+        (Pat::Lit(Lit::Float(p)), Value::Float(v)) if p == v => Some(Vec::new()),
+        (Pat::Lit(Lit::Str(p)), Value::Str(v)) if p == v => Some(Vec::new()),
+        (Pat::Lit(Lit::Bool(p)), Value::Bool(v)) if p == v => Some(Vec::new()),
+        (Pat::Lit(Lit::Unit), Value::Unit) => Some(Vec::new()),
+        (Pat::Cons(name, args), Value::Cons(vn, vargs))
+            if name == vn && args.len() == vargs.len() =>
+        {
+            let mut bs = Vec::new();
+            for (p, v) in args.iter().zip(vargs.iter()) {
+                bs.extend(match_pat(p, v)?);
+            }
+            Some(bs)
+        }
+        (Pat::Tuple(pats), Value::Tuple(vs)) if pats.len() == vs.len() => {
+            let mut bs = Vec::new();
+            for (p, v) in pats.iter().zip(vs.iter()) {
+                bs.extend(match_pat(p, v)?);
+            }
+            Some(bs)
+        }
+        (Pat::Record(fields), Value::Record(vs)) => {
+            let mut bs = Vec::new();
+            for (n, p) in fields {
+                let v = vs.iter().find(|(vn, _)| vn == n).map(|(_, v)| v)?;
+                bs.extend(match_pat(p, v)?);
+            }
+            Some(bs)
+        }
+        (Pat::Or(alts), v) => {
+            for a in alts {
+                if let Some(bs) = match_pat(a, v) {
+                    return Some(bs);
+                }
+            }
+            None
+        }
+        (Pat::As(inner, name), v) => {
+            let mut bs = match_pat(inner, v)?;
+            bs.push((name.clone(), v.clone()));
+            Some(bs)
+        }
+        (Pat::Range(lo, hi), Value::Int(v)) => {
+            if let (Pat::Lit(Lit::Int(l)), Pat::Lit(Lit::Int(h))) = (&**lo, &**hi) {
+                if l <= v && v <= h {
+                    return Some(Vec::new());
+                }
+            }
+            None
+        }
+        (Pat::List(parts), Value::Series(vs)) => {
+            let total = vs.len();
+            let fixed_before: usize = parts
+                .iter()
+                .take_while(|p| !matches!(p, ListPart::Rest(_)))
+                .count();
+            let has_rest = parts.iter().any(|p| matches!(p, ListPart::Rest(_)));
+            let fixed_after: usize = parts
+                .iter()
+                .rev()
+                .take_while(|p| !matches!(p, ListPart::Rest(_)))
+                .count();
+            if !has_rest {
+                if parts.len() != total {
+                    return None;
+                }
+            } else if fixed_before + fixed_after > total {
+                return None;
+            }
+            let mut bs = Vec::new();
+            for (p, v) in parts.iter().take(fixed_before).zip(vs.iter().take(fixed_before)) {
+                if let ListPart::Pat(p) = p {
+                    bs.extend(match_pat(p, v)?);
+                }
+            }
+            if let Some(ListPart::Rest(name)) = parts.iter().find(|p| matches!(p, ListPart::Rest(_))) {
+                let rest = &vs[fixed_before..total - fixed_after];
+                if let Some(n) = name {
+                    bs.push((n.clone(), Value::Series(rest.to_vec())));
+                }
+            }
+            for (p, v) in parts.iter().rev().take(fixed_after).zip(vs.iter().rev().take(fixed_after))
+            {
+                if let ListPart::Pat(p) = p {
+                    bs.extend(match_pat(p, v)?);
+                }
+            }
+            Some(bs)
+        }
+        _ => None,
     }
 }
 
@@ -187,7 +381,6 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, RuntimeError> {
         Expr::Sym(s) => Ok(Value::Sym(s.clone())),
         Expr::Var(name) => env
             .lookup(name)
-            .cloned()
             .ok_or_else(|| RuntimeError::new(format!("unbound: {name}"))),
         Expr::Lambda(params, body) => Ok(Value::Closure {
             params: params.clone(),
@@ -256,6 +449,34 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, RuntimeError> {
                 Some(e) => eval(e, &block_env),
                 None => Ok(Value::Unit),
             }
+        }
+        Expr::Match(scrut, arms) => {
+            let s = eval(scrut, env)?;
+            for arm in arms {
+                if let Some(bindings) = match_pat(&arm.pat, &s) {
+                    let mut arm_env = env.clone();
+                    for (n, v) in bindings {
+                        arm_env = arm_env.extend(n, v);
+                    }
+                    if let Some(guard) = &arm.guard {
+                        match eval(guard, &arm_env)? {
+                            Value::Bool(true) => {}
+                            Value::Bool(false) => continue,
+                            other => {
+                                return Err(RuntimeError::new(format!(
+                                    "guard must be Bool, got {}",
+                                    show(&other)
+                                )));
+                            }
+                        }
+                    }
+                    return eval(&arm.body, &arm_env);
+                }
+            }
+            Err(RuntimeError::new(format!(
+                "no match arm matched value {}",
+                show(&s)
+            )))
         }
         other => Err(RuntimeError::new(format!("cannot yet evaluate {other:?}"))),
     }
