@@ -1,7 +1,9 @@
 //! Type checking and inference for the Vela language.
 
 use std::collections::HashMap;
-use vela_parser::{BinOp, Expr, Lit, Pat, PostOp, Stmt, TypeDeclBody, UnOp, parse_expr, parse_program};
+use vela_parser::{
+    BinOp, Expr, ListPart, Lit, Pat, PostOp, Stmt, TypeDeclBody, UnOp, parse_expr, parse_program,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -1251,6 +1253,11 @@ fn is_absorbing(pat: &Pat) -> bool {
         Pat::Wildcard | Pat::Var(_) => true,
         Pat::As(inner, _) => is_absorbing(inner),
         Pat::Or(alts) => alts.iter().any(is_absorbing),
+        Pat::Tuple(pats) => pats.iter().all(is_absorbing),
+        Pat::Record(fields) => fields.iter().all(|(_, p)| is_absorbing(p)),
+        Pat::List(parts) => {
+            parts.len() == 1 && matches!(parts[0], ListPart::Rest(_))
+        }
         _ => false,
     }
 }
@@ -1325,7 +1332,54 @@ fn infer_pat(
             }
             Ok((current, bindings))
         }
-        other => Err(TypeError::new(format!("cannot yet type pattern: {other:?}"))),
+        Pat::Tuple(pats) => {
+            let mut types = Vec::with_capacity(pats.len());
+            let mut bindings = Vec::new();
+            for p in pats {
+                let (pt, mut bs) = infer_pat(p, env, ctx)?;
+                types.push(pt);
+                bindings.append(&mut bs);
+            }
+            Ok((Type::Tuple(types), bindings))
+        }
+        Pat::Record(fields) => {
+            let mut pat_fields = Vec::with_capacity(fields.len());
+            let mut bindings = Vec::new();
+            for (n, p) in fields {
+                let (pt, mut bs) = infer_pat(p, env, ctx)?;
+                pat_fields.push((n.clone(), pt));
+                bindings.append(&mut bs);
+            }
+            let tail = ctx.fresh_var();
+            Ok((Type::Record(pat_fields, Some(Box::new(tail))), bindings))
+        }
+        Pat::List(parts) => {
+            let elem_ty = ctx.fresh_var();
+            let mut bindings = Vec::new();
+            for part in parts {
+                match part {
+                    ListPart::Pat(p) => {
+                        let (pt, mut bs) = infer_pat(p, env, ctx)?;
+                        ctx.unify(&elem_ty, &pt)?;
+                        bindings.append(&mut bs);
+                    }
+                    ListPart::Rest(Some(name)) => {
+                        bindings.push((
+                            name.clone(),
+                            Type::Series(Box::new(elem_ty.clone())),
+                        ));
+                    }
+                    ListPart::Rest(None) => {}
+                }
+            }
+            Ok((Type::Series(Box::new(elem_ty)), bindings))
+        }
+        Pat::Range(lo, hi) => {
+            let (lo_t, _) = infer_pat(lo, env, ctx)?;
+            let (hi_t, _) = infer_pat(hi, env, ctx)?;
+            ctx.unify(&lo_t, &hi_t)?;
+            Ok((lo_t, Vec::new()))
+        }
     }
 }
 
