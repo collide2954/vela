@@ -500,7 +500,7 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             let s_ty = infer(scrut, env, ctx)?;
             let result_ty = ctx.fresh_var();
             for arm in arms {
-                let (pat_ty, bindings) = infer_pat(&arm.pat, ctx)?;
+                let (pat_ty, bindings) = infer_pat(&arm.pat, env, ctx)?;
                 ctx.unify(&s_ty, &pat_ty)?;
                 let mut arm_env = env.clone();
                 for (n, t) in bindings {
@@ -626,7 +626,11 @@ fn collect_ftv(ty: &Type, ctx: &Ctx, out: &mut std::collections::BTreeSet<u32>) 
     }
 }
 
-fn infer_pat(pat: &Pat, ctx: &mut Ctx) -> Result<(Type, Vec<(String, Type)>), TypeError> {
+fn infer_pat(
+    pat: &Pat,
+    env: &Env,
+    ctx: &mut Ctx,
+) -> Result<(Type, Vec<(String, Type)>), TypeError> {
     match pat {
         Pat::Wildcard => Ok((ctx.fresh_var(), Vec::new())),
         Pat::Var(name) => {
@@ -639,7 +643,7 @@ fn infer_pat(pat: &Pat, ctx: &mut Ctx) -> Result<(Type, Vec<(String, Type)>), Ty
         Pat::Lit(Lit::Bool(_)) => Ok((Type::Bool, Vec::new())),
         Pat::Lit(Lit::Unit) => Ok((Type::Unit, Vec::new())),
         Pat::As(inner, name) => {
-            let (t, mut bs) = infer_pat(inner, ctx)?;
+            let (t, mut bs) = infer_pat(inner, env, ctx)?;
             bs.push((name.clone(), t.clone()));
             Ok((t, bs))
         }
@@ -647,12 +651,29 @@ fn infer_pat(pat: &Pat, ctx: &mut Ctx) -> Result<(Type, Vec<(String, Type)>), Ty
             if alts.is_empty() {
                 return Err(TypeError::new("empty or-pattern"));
             }
-            let (t, bs) = infer_pat(&alts[0], ctx)?;
+            let (t, bs) = infer_pat(&alts[0], env, ctx)?;
             for a in &alts[1..] {
-                let (t2, _) = infer_pat(a, ctx)?;
+                let (t2, _) = infer_pat(a, env, ctx)?;
                 ctx.unify(&t, &t2)?;
             }
             Ok((t, bs))
+        }
+        Pat::Cons(name, args) => {
+            let scheme = env
+                .lookup(name)
+                .cloned()
+                .ok_or_else(|| TypeError::new(format!("unbound constructor: {name}")))?;
+            let mut current = ctx.instantiate(&scheme);
+            let mut bindings = Vec::new();
+            for arg in args {
+                let (arg_ty, mut arg_bs) = infer_pat(arg, env, ctx)?;
+                let result = ctx.fresh_var();
+                let expected = Type::Fn(Box::new(arg_ty), Box::new(result.clone()));
+                ctx.unify(&current, &expected)?;
+                current = ctx.resolve(&result);
+                bindings.append(&mut arg_bs);
+            }
+            Ok((current, bindings))
         }
         other => Err(TypeError::new(format!("cannot yet type pattern: {other:?}"))),
     }
