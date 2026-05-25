@@ -1,7 +1,7 @@
 //! Type checking and inference for the Vela language.
 
 use std::collections::HashMap;
-use vela_parser::{BinOp, Expr, Lit, Pat, PostOp, Stmt, UnOp, parse_expr, parse_program};
+use vela_parser::{BinOp, Expr, Lit, Pat, PostOp, Stmt, TypeDeclBody, UnOp, parse_expr, parse_program};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -22,6 +22,7 @@ pub enum Type {
     DataFrame,
     Option(Box<Type>),
     Result(Box<Type>, Box<Type>),
+    Named(String, Vec<Type>),
 }
 
 impl Type {
@@ -51,6 +52,14 @@ impl Type {
             Type::DataFrame => "DataFrame".into(),
             Type::Option(t) => format!("Option[{}]", t.show()),
             Type::Result(a, e) => format!("Result[{}, {}]", a.show(), e.show()),
+            Type::Named(name, args) => {
+                if args.is_empty() {
+                    name.clone()
+                } else {
+                    let parts: Vec<String> = args.iter().map(|t| t.show()).collect();
+                    format!("{name}[{}]", parts.join(", "))
+                }
+            }
         }
     }
 
@@ -137,6 +146,10 @@ impl Ctx {
             Type::Result(a, e) => {
                 Type::Result(Box::new(self.resolve(a)), Box::new(self.resolve(e)))
             }
+            Type::Named(name, args) => Type::Named(
+                name.clone(),
+                args.iter().map(|t| self.resolve(t)).collect(),
+            ),
             other => other.clone(),
         }
     }
@@ -176,6 +189,7 @@ impl Ctx {
             Type::Record(fields) => fields.iter().any(|(_, t)| self.occurs(n, t)),
             Type::Option(t) => self.occurs(n, &t),
             Type::Result(a, e) => self.occurs(n, &a) || self.occurs(n, &e),
+            Type::Named(_, args) => args.iter().any(|t| self.occurs(n, t)),
             _ => false,
         }
     }
@@ -219,6 +233,24 @@ impl Ctx {
             (Type::Result(a1, e1), Type::Result(a2, e2)) => {
                 self.unify(&a1, &a2)?;
                 self.unify(&e1, &e2)
+            }
+            (Type::Named(n1, a1), Type::Named(n2, a2)) => {
+                if n1 != n2 {
+                    return Err(TypeError::new(format!(
+                        "cannot unify type `{n1}` with `{n2}`"
+                    )));
+                }
+                if a1.len() != a2.len() {
+                    return Err(TypeError::new(format!(
+                        "type `{n1}` arity mismatch: {} vs {}",
+                        a1.len(),
+                        a2.len()
+                    )));
+                }
+                for (x, y) in a1.iter().zip(a2.iter()) {
+                    self.unify(x, y)?;
+                }
+                Ok(())
             }
             (Type::Record(a), Type::Record(b)) => {
                 if a.len() != b.len() {
@@ -351,6 +383,39 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             }
             let resolved = ctx.resolve(&body_ty);
             *env = env.extend(name.clone(), Scheme::mono(resolved));
+            Ok(Type::Unit)
+        }
+        Stmt::TypeDecl(decl) => {
+            let mut translator = TyTranslator::new();
+            let mut param_vars: Vec<u32> = Vec::new();
+            for param_name in &decl.params {
+                let v = ctx.fresh_var();
+                if let Type::Var(n) = v {
+                    translator.named_vars.insert(param_name.clone(), Type::Var(n));
+                    param_vars.push(n);
+                }
+            }
+            let result_type = Type::Named(
+                decl.name.clone(),
+                decl.params
+                    .iter()
+                    .map(|p| translator.named_vars[p].clone())
+                    .collect(),
+            );
+            match &decl.body {
+                TypeDeclBody::Sum(variants) => {
+                    for v in variants {
+                        let mut ty = result_type.clone();
+                        for arg in v.args.iter().rev() {
+                            let arg_ty = translator.translate(arg, ctx)?;
+                            ty = Type::Fn(Box::new(arg_ty), Box::new(ty));
+                        }
+                        let scheme = Scheme { vars: param_vars.clone(), ty };
+                        *env = env.extend(v.name.clone(), scheme);
+                    }
+                }
+                TypeDeclBody::Alias(_) => {}
+            }
             Ok(Type::Unit)
         }
         Stmt::Expr(e) => infer(e, env, ctx),
@@ -593,6 +658,10 @@ fn apply_subst(ty: &Type, subst: &HashMap<u32, Type>) -> Type {
         Type::Result(a, e) => {
             Type::Result(Box::new(apply_subst(a, subst)), Box::new(apply_subst(e, subst)))
         }
+        Type::Named(name, args) => Type::Named(
+            name.clone(),
+            args.iter().map(|t| apply_subst(t, subst)).collect(),
+        ),
         other => other.clone(),
     }
 }
@@ -621,6 +690,11 @@ fn collect_ftv(ty: &Type, ctx: &Ctx, out: &mut std::collections::BTreeSet<u32>) 
         Type::Result(a, e) => {
             collect_ftv(&a, ctx, out);
             collect_ftv(&e, ctx, out);
+        }
+        Type::Named(_, args) => {
+            for t in &args {
+                collect_ftv(t, ctx, out);
+            }
         }
         _ => {}
     }
