@@ -1,6 +1,7 @@
 //! Syntactic analysis for the Vela language.
 
-use vela_lexer::{Keyword, Op, Punct, TokenKind, lex};
+use std::ops::Range;
+use vela_lexer::{Keyword, Op, Punct, Span, Token, TokenKind, lex};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
@@ -211,11 +212,17 @@ pub enum PostOp {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseError {
     pub message: String,
+    pub span: Option<Range<usize>>,
 }
 
 impl ParseError {
     fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
+        Self { message: message.into(), span: None }
+    }
+
+    fn with_span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
     }
 }
 
@@ -253,14 +260,15 @@ pub fn parse_program(src: &str) -> Result<Program, ParseError> {
 }
 
 struct Parser {
-    tokens: Vec<TokenKind>,
+    tokens: Vec<Token>,
     pos: usize,
+    eof_offset: usize,
 }
 
 impl Parser {
     fn new(src: &str) -> Self {
-        let tokens = lex(src).map(|t| t.kind).collect();
-        Self { tokens, pos: 0 }
+        let tokens: Vec<Token> = lex(src).collect();
+        Self { tokens, pos: 0, eof_offset: src.len() }
     }
 
     fn skip_newlines(&mut self) {
@@ -270,22 +278,38 @@ impl Parser {
     }
 
     fn peek(&self) -> Option<&TokenKind> {
-        self.tokens.get(self.pos)
+        self.tokens.get(self.pos).map(|t| &t.kind)
+    }
+
+    fn current_span(&self) -> Span {
+        match self.tokens.get(self.pos) {
+            Some(t) => t.span.clone(),
+            None => self.eof_offset..self.eof_offset,
+        }
     }
 
     fn bump(&mut self) -> Option<TokenKind> {
-        let tok = self.tokens.get(self.pos).cloned()?;
+        let tok = self.tokens.get(self.pos).map(|t| t.kind.clone())?;
         self.pos += 1;
         Some(tok)
     }
 
+    fn err(&self, message: impl Into<String>) -> ParseError {
+        ParseError::new(message).with_span(self.current_span())
+    }
+
     fn expect(&mut self, expected: &TokenKind) -> Result<(), ParseError> {
+        let span = self.current_span();
         match self.bump() {
             Some(ref t) if t == expected => Ok(()),
-            Some(other) => {
-                Err(ParseError::new(format!("expected {expected:?}, found {other:?}")))
-            }
-            None => Err(ParseError::new(format!("expected {expected:?}, found end of input"))),
+            Some(other) => Err(ParseError::new(format!(
+                "expected {expected:?}, found {other:?}"
+            ))
+            .with_span(span)),
+            None => Err(ParseError::new(format!(
+                "expected {expected:?}, found end of input"
+            ))
+            .with_span(span)),
         }
     }
 
@@ -1192,7 +1216,10 @@ impl Parser {
     }
 
     fn parse_atom(&mut self) -> Result<Expr, ParseError> {
-        let tok = self.bump().ok_or_else(|| ParseError::new("empty input"))?;
+        let span = self.current_span();
+        let tok = self
+            .bump()
+            .ok_or_else(|| ParseError::new("empty input").with_span(span.clone()))?;
         match tok {
             TokenKind::Int(n) => Ok(Expr::Lit(Lit::Int(n))),
             TokenKind::Float(f) => Ok(Expr::Lit(Lit::Float(f))),
@@ -1281,7 +1308,7 @@ impl Parser {
             TokenKind::Punct(Punct::LBracket) => self.parse_series(),
             TokenKind::Punct(Punct::FrameOpen) => self.parse_dataframe(),
             TokenKind::Punct(Punct::ArrayOpen) => self.parse_array(),
-            other => Err(ParseError::new(format!("unexpected token: {other:?}"))),
+            other => Err(ParseError::new(format!("unexpected token: {other:?}")).with_span(span)),
         }
     }
 }

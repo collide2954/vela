@@ -11,7 +11,9 @@ name = "vela"
 path = "src/main.rs"
 
 [dependencies]
-vela-check = { path = "../vela-check" }
+vela-check  = { path = "../vela-check" }
+vela-diag   = { path = "../vela-diag" }
+vela-parser = { path = "../vela-parser" }
 
 [lints]
 workspace = true

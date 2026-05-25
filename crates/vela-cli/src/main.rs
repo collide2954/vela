@@ -2,6 +2,8 @@ use std::env;
 use std::fs;
 use std::process::ExitCode;
 
+use vela_diag::Diagnostic;
+
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
     let Some(cmd) = args.get(1) else {
@@ -26,16 +28,7 @@ fn main() -> ExitCode {
                     return ExitCode::from(1);
                 }
             };
-            match vela_check::check_program(&source) {
-                Ok(_) => {
-                    println!("ok");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("error: {}", e.message);
-                    ExitCode::from(1)
-                }
-            }
+            check_one(path, &source)
         }
         "--version" | "-V" => {
             println!("vela {}", env!("CARGO_PKG_VERSION"));
@@ -44,6 +37,31 @@ fn main() -> ExitCode {
         other => {
             eprintln!("unknown subcommand: {other}");
             ExitCode::from(2)
+        }
+    }
+}
+
+fn check_one(path: &str, source: &str) -> ExitCode {
+    match vela_parser::parse_program(source) {
+        Ok(_) => {}
+        Err(e) => {
+            let mut diag = Diagnostic::error(e.message).with_path(path);
+            if let Some(span) = e.span {
+                diag = diag.with_span(span);
+            }
+            eprint!("{}", diag.render(source));
+            return ExitCode::from(1);
+        }
+    }
+    match vela_check::check_program(source) {
+        Ok(_) => {
+            println!("ok");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            let diag = Diagnostic::error(e.message).with_path(path);
+            eprint!("{}", diag.render(source));
+            ExitCode::from(1)
         }
     }
 }
