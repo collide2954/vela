@@ -69,9 +69,21 @@ impl TypeError {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Scheme {
+    vars: Vec<u32>,
+    ty: Type,
+}
+
+impl Scheme {
+    fn mono(ty: Type) -> Self {
+        Self { vars: Vec::new(), ty }
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Env {
-    bindings: HashMap<String, Type>,
+    bindings: HashMap<String, Scheme>,
 }
 
 impl Env {
@@ -79,13 +91,13 @@ impl Env {
         Self::default()
     }
 
-    fn extend(&self, name: String, ty: Type) -> Env {
+    fn extend(&self, name: String, scheme: Scheme) -> Env {
         let mut bindings = self.bindings.clone();
-        bindings.insert(name, ty);
+        bindings.insert(name, scheme);
         Env { bindings }
     }
 
-    fn lookup(&self, name: &str) -> Option<&Type> {
+    fn lookup(&self, name: &str) -> Option<&Scheme> {
         self.bindings.get(name)
     }
 }
@@ -119,6 +131,32 @@ impl Ctx {
             ),
             other => other.clone(),
         }
+    }
+
+    fn instantiate(&mut self, scheme: &Scheme) -> Type {
+        let mut subst: HashMap<u32, Type> = HashMap::new();
+        for &v in &scheme.vars {
+            subst.insert(v, self.fresh_var());
+        }
+        apply_subst(&scheme.ty, &subst)
+    }
+
+    fn generalize(&self, env: &Env, ty: &Type) -> Scheme {
+        let resolved = self.resolve(ty);
+        let mut ty_ftv = std::collections::BTreeSet::new();
+        collect_ftv(&resolved, self, &mut ty_ftv);
+        let mut env_ftv = std::collections::BTreeSet::new();
+        for scheme in env.bindings.values() {
+            let resolved_scheme_ty = self.resolve(&scheme.ty);
+            let mut s_ftv = std::collections::BTreeSet::new();
+            collect_ftv(&resolved_scheme_ty, self, &mut s_ftv);
+            for v in scheme.vars.iter() {
+                s_ftv.remove(v);
+            }
+            env_ftv.extend(s_ftv);
+        }
+        let vars: Vec<u32> = ty_ftv.difference(&env_ftv).copied().collect();
+        Scheme { vars, ty: resolved }
     }
 
     fn occurs(&self, n: u32, t: &Type) -> bool {
@@ -218,13 +256,14 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
     match stmt {
         Stmt::Let { name, params, body, .. } if params.is_empty() => {
             let ty = infer(body, env, ctx)?;
-            let ty = ctx.resolve(&ty);
-            *env = env.extend(name.clone(), ty);
+            let scheme = ctx.generalize(env, &ty);
+            *env = env.extend(name.clone(), scheme);
             Ok(Type::Unit)
         }
         Stmt::Let { name, params, body, .. } => {
             let lambda = lambda_type(params, body, env, ctx)?;
-            *env = env.extend(name.clone(), ctx.resolve(&lambda));
+            let scheme = ctx.generalize(env, &lambda);
+            *env = env.extend(name.clone(), scheme);
             Ok(Type::Unit)
         }
         Stmt::Expr(e) => infer(e, env, ctx),
@@ -242,7 +281,7 @@ fn lambda_type(
     let mut param_types = Vec::with_capacity(params.len());
     for p in params {
         let pt = ctx.fresh_var();
-        env = env.extend(p.name.clone(), pt.clone());
+        env = env.extend(p.name.clone(), Scheme::mono(pt.clone()));
         param_types.push(pt);
     }
     let body_ty = infer(body, &env, ctx)?;
@@ -259,10 +298,13 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
         Expr::Lit(Lit::Str(_)) => Ok(Type::String),
         Expr::Lit(Lit::Bool(_)) => Ok(Type::Bool),
         Expr::Lit(Lit::Unit) => Ok(Type::Unit),
-        Expr::Var(name) => env
-            .lookup(name)
-            .cloned()
-            .ok_or_else(|| TypeError::new(format!("unbound name: {name}"))),
+        Expr::Var(name) => {
+            let scheme = env
+                .lookup(name)
+                .cloned()
+                .ok_or_else(|| TypeError::new(format!("unbound name: {name}")))?;
+            Ok(ctx.instantiate(&scheme))
+        }
         Expr::UnaryOp(op, inner) => infer_unary(*op, inner, env, ctx),
         Expr::BinOp(op, lhs, rhs) => infer_binary(*op, lhs, rhs, env, ctx),
         Expr::Lambda(params, body) => {
@@ -271,6 +313,16 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
                 .map(|n| vela_parser::Param { name: n.clone(), ty: None })
                 .collect();
             lambda_type(&params, body, env, ctx)
+        }
+        Expr::Block { stmts, trailing } => {
+            let mut block_env = env.clone();
+            for s in stmts {
+                check_stmt(s, &mut block_env, ctx)?;
+            }
+            match trailing {
+                Some(e) => infer(e, &block_env, ctx),
+                None => Ok(Type::Unit),
+            }
         }
         Expr::App(f, arg) => {
             let f_ty = infer(f, env, ctx)?;
@@ -357,7 +409,7 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
                 ctx.unify(&s_ty, &pat_ty)?;
                 let mut arm_env = env.clone();
                 for (n, t) in bindings {
-                    arm_env = arm_env.extend(n, t);
+                    arm_env = arm_env.extend(n, Scheme::mono(t));
                 }
                 if let Some(g) = &arm.guard {
                     let gt = infer(g, &arm_env, ctx)?;
@@ -369,6 +421,45 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             Ok(ctx.resolve(&result_ty))
         }
         other => Err(TypeError::new(format!("cannot yet infer type of {other:?}"))),
+    }
+}
+
+fn apply_subst(ty: &Type, subst: &HashMap<u32, Type>) -> Type {
+    match ty {
+        Type::Var(n) => subst.get(n).cloned().unwrap_or(Type::Var(*n)),
+        Type::Fn(a, b) => {
+            Type::Fn(Box::new(apply_subst(a, subst)), Box::new(apply_subst(b, subst)))
+        }
+        Type::Series(t) => Type::Series(Box::new(apply_subst(t, subst))),
+        Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| apply_subst(t, subst)).collect()),
+        Type::Record(fs) => Type::Record(
+            fs.iter().map(|(n, t)| (n.clone(), apply_subst(t, subst))).collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn collect_ftv(ty: &Type, ctx: &Ctx, out: &mut std::collections::BTreeSet<u32>) {
+    match ctx.resolve(ty) {
+        Type::Var(n) => {
+            out.insert(n);
+        }
+        Type::Fn(a, b) => {
+            collect_ftv(&a, ctx, out);
+            collect_ftv(&b, ctx, out);
+        }
+        Type::Series(t) => collect_ftv(&t, ctx, out),
+        Type::Tuple(ts) => {
+            for t in &ts {
+                collect_ftv(t, ctx, out);
+            }
+        }
+        Type::Record(fs) => {
+            for (_, t) in &fs {
+                collect_ftv(t, ctx, out);
+            }
+        }
+        _ => {}
     }
 }
 
