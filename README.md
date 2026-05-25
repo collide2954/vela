@@ -20,19 +20,80 @@ Nothing here is stable.
 
 ## A taste
 
-    let standardize (xs : [Float]) : [Float] =
-        let m = mean xs
-        let s = std xs
-        xs |> map (fn x -> (x - m) / s)
+A function with annotated arguments and a return type:
 
-    type Shape =
-        | Circle Float
-        | Square Float
+```vela
+let standardize (xs : [Float]) : [Float] =
+    let m = mean xs
+    let s = std xs
+    xs |> map (fn x -> (x - m) / s)
+```
 
-    let area shape =
-        match shape with
-        | Circle r -> 3.14159 * r * r
-        | Square s -> s * s
+Algebraic data types, pattern matching, and constructors as values:
+
+```vela
+type Shape =
+    | Circle Float
+    | Square Float
+    | Rect   { width : Float, height : Float }
+
+let area shape =
+    match shape with
+    | Circle r                          -> 3.14159 * r * r
+    | Square s | Rect { width = s, height = s } -> s * s
+    | Rect { width = w, height = h }    -> w * h
+```
+
+Errors as values, propagated with `?`:
+
+```vela
+let load path =
+    let raw = read_file path?
+    let df  = parse_csv raw?
+    Ok df
+```
+
+DataFrames are a first-class language construct, not a library:
+
+```vela
+import std.data
+
+let df = data.iris
+df
+|> group_by :species
+|> summarize { mu = mean (col :petal_length) }
+|> plot (aes { x = :species, y = :mu })
+    ++ bar ()
+```
+
+A reactive app shares a one-page analysis without any frontend code:
+
+```vela
+let dashboard = app =
+    input n        = slider { min = 1, max = 1000, default = 100 }
+    input dataset  = file_picker { accept = [".csv"] }
+
+    let df         = read_csv dataset?
+    let sample     = df |> head n
+
+    output table   = sample
+    output hist    = plot sample (aes { x = :x }) ++ hist ()
+    output summary = format "rows = {}, cols = {}" sample.rows sample.cols
+```
+
+Test cases and property tests live alongside the code they cover:
+
+```vela
+pub let mean xs = sum xs / Float.of_int (length xs)
+
+tests =
+    test "mean of [1, 2, 3] is 2" =
+        assert (mean [1.0, 2.0, 3.0] == Ok 2.0)
+
+    prop "mean is between min and max" (xs : [Float]) when length xs > 0 =
+        let m = mean xs |> Result.unwrap
+        min xs <= m and m <= max xs
+```
 
 ## Layout
 

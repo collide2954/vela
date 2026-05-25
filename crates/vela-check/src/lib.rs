@@ -252,6 +252,12 @@ impl Ctx {
         apply_subst(&scheme.ty, &subst)
     }
 
+    fn fresh_id(&mut self) -> u32 {
+        let n = self.fresh;
+        self.fresh += 1;
+        n
+    }
+
     fn generalize(&self, env: &Env, ty: &Type) -> Scheme {
         let resolved = self.resolve(ty);
         let mut ty_ftv = std::collections::BTreeSet::new();
@@ -360,7 +366,7 @@ impl Ctx {
 pub fn check_expr(src: &str) -> Result<Type, TypeError> {
     let expr = parse_expr(src).map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
     let mut ctx = Ctx::default();
-    let env = prelude();
+    let env = prelude(&mut ctx);
     let t = infer(&expr, &env, &mut ctx)?;
     Ok(ctx.resolve(&t))
 }
@@ -369,7 +375,7 @@ pub fn check_program(src: &str) -> Result<Type, TypeError> {
     let program = parse_program(src)
         .map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
     let mut ctx = Ctx::default();
-    let mut env = prelude();
+    let mut env = prelude(&mut ctx);
     let mut last = Type::Unit;
     for stmt in &program.stmts {
         last = check_stmt(stmt, &mut env, &mut ctx)?;
@@ -377,52 +383,56 @@ pub fn check_program(src: &str) -> Result<Type, TypeError> {
     Ok(ctx.resolve(&last))
 }
 
-fn prelude() -> Env {
+fn prelude(ctx: &mut Ctx) -> Env {
     let mut env = Env::new();
-    // None : forall a. Option a
-    env = env.extend(
-        "None".into(),
-        Scheme { vars: vec![0], ty: Type::Option(Box::new(Type::Var(0))) },
-    );
-    // Some : forall a. a -> Option a
-    env = env.extend(
-        "Some".into(),
-        Scheme {
-            vars: vec![0],
-            ty: Type::Fn(
-                Box::new(Type::Var(0)),
-                Box::new(Type::Option(Box::new(Type::Var(0)))),
-            ),
-        },
-    );
-    // Ok : forall a e. a -> Result a e
-    env = env.extend(
-        "Ok".into(),
-        Scheme {
-            vars: vec![0, 1],
-            ty: Type::Fn(
-                Box::new(Type::Var(0)),
-                Box::new(Type::Result(
-                    Box::new(Type::Var(0)),
-                    Box::new(Type::Var(1)),
-                )),
-            ),
-        },
-    );
-    // Err : forall a e. e -> Result a e
-    env = env.extend(
-        "Err".into(),
-        Scheme {
-            vars: vec![0, 1],
-            ty: Type::Fn(
-                Box::new(Type::Var(1)),
-                Box::new(Type::Result(
-                    Box::new(Type::Var(0)),
-                    Box::new(Type::Var(1)),
-                )),
-            ),
-        },
-    );
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "None".into(),
+            Scheme { vars: vec![a], ty: Type::Option(Box::new(Type::Var(a))) },
+        );
+    }
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "Some".into(),
+            Scheme {
+                vars: vec![a],
+                ty: Type::Fn(
+                    Box::new(Type::Var(a)),
+                    Box::new(Type::Option(Box::new(Type::Var(a)))),
+                ),
+            },
+        );
+    }
+    {
+        let a = ctx.fresh_id();
+        let e = ctx.fresh_id();
+        env = env.extend(
+            "Ok".into(),
+            Scheme {
+                vars: vec![a, e],
+                ty: Type::Fn(
+                    Box::new(Type::Var(a)),
+                    Box::new(Type::Result(Box::new(Type::Var(a)), Box::new(Type::Var(e)))),
+                ),
+            },
+        );
+    }
+    {
+        let a = ctx.fresh_id();
+        let e = ctx.fresh_id();
+        env = env.extend(
+            "Err".into(),
+            Scheme {
+                vars: vec![a, e],
+                ty: Type::Fn(
+                    Box::new(Type::Var(e)),
+                    Box::new(Type::Result(Box::new(Type::Var(a)), Box::new(Type::Var(e)))),
+                ),
+            },
+        );
+    }
     env
 }
 
