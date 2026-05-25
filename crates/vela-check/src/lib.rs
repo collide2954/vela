@@ -1,7 +1,7 @@
 //! Type checking and inference for the Vela language.
 
 use std::collections::HashMap;
-use vela_parser::{BinOp, Expr, Lit, Stmt, UnOp, parse_expr, parse_program};
+use vela_parser::{BinOp, Expr, Lit, Pat, Stmt, UnOp, parse_expr, parse_program};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -225,7 +225,66 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             ctx.unify(&f_ty, &expected)?;
             Ok(ctx.resolve(&result))
         }
+        Expr::If(cond, then_b, else_b) => {
+            let cond_ty = infer(cond, env, ctx)?;
+            ctx.unify(&cond_ty, &Type::Bool)?;
+            let then_ty = infer(then_b, env, ctx)?;
+            let else_ty = infer(else_b, env, ctx)?;
+            ctx.unify(&then_ty, &else_ty)?;
+            Ok(ctx.resolve(&then_ty))
+        }
+        Expr::Match(scrut, arms) => {
+            let s_ty = infer(scrut, env, ctx)?;
+            let result_ty = ctx.fresh_var();
+            for arm in arms {
+                let (pat_ty, bindings) = infer_pat(&arm.pat, ctx)?;
+                ctx.unify(&s_ty, &pat_ty)?;
+                let mut arm_env = env.clone();
+                for (n, t) in bindings {
+                    arm_env = arm_env.extend(n, t);
+                }
+                if let Some(g) = &arm.guard {
+                    let gt = infer(g, &arm_env, ctx)?;
+                    ctx.unify(&gt, &Type::Bool)?;
+                }
+                let body_ty = infer(&arm.body, &arm_env, ctx)?;
+                ctx.unify(&result_ty, &body_ty)?;
+            }
+            Ok(ctx.resolve(&result_ty))
+        }
         other => Err(TypeError::new(format!("cannot yet infer type of {other:?}"))),
+    }
+}
+
+fn infer_pat(pat: &Pat, ctx: &mut Ctx) -> Result<(Type, Vec<(String, Type)>), TypeError> {
+    match pat {
+        Pat::Wildcard => Ok((ctx.fresh_var(), Vec::new())),
+        Pat::Var(name) => {
+            let t = ctx.fresh_var();
+            Ok((t.clone(), vec![(name.clone(), t)]))
+        }
+        Pat::Lit(Lit::Int(_)) => Ok((Type::Int, Vec::new())),
+        Pat::Lit(Lit::Float(_)) => Ok((Type::Float, Vec::new())),
+        Pat::Lit(Lit::Str(_)) => Ok((Type::String, Vec::new())),
+        Pat::Lit(Lit::Bool(_)) => Ok((Type::Bool, Vec::new())),
+        Pat::Lit(Lit::Unit) => Ok((Type::Unit, Vec::new())),
+        Pat::As(inner, name) => {
+            let (t, mut bs) = infer_pat(inner, ctx)?;
+            bs.push((name.clone(), t.clone()));
+            Ok((t, bs))
+        }
+        Pat::Or(alts) => {
+            if alts.is_empty() {
+                return Err(TypeError::new("empty or-pattern"));
+            }
+            let (t, bs) = infer_pat(&alts[0], ctx)?;
+            for a in &alts[1..] {
+                let (t2, _) = infer_pat(a, ctx)?;
+                ctx.unify(&t, &t2)?;
+            }
+            Ok((t, bs))
+        }
+        other => Err(TypeError::new(format!("cannot yet type pattern: {other:?}"))),
     }
 }
 
