@@ -565,7 +565,17 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             Ok(Type::Unit)
         }
         Stmt::Expr(e) => infer(e, env, ctx),
-        other => Err(TypeError::new(format!("cannot yet check {other:?}"))),
+        Stmt::TraitDecl(_)
+        | Stmt::Impl(_)
+        | Stmt::Tests(_)
+        | Stmt::Extern { .. }
+        | Stmt::Import { .. } => Ok(Type::Unit),
+        Stmt::Input { name, body } | Stmt::Output { name, body } => {
+            let ty = infer(body, env, ctx)?;
+            let ty = ctx.resolve(&ty);
+            *env = env.extend(name.clone(), Scheme::mono(ty));
+            Ok(Type::Unit)
+        }
     }
 }
 
@@ -736,7 +746,36 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             check_exhaustive(&s_ty, arms, ctx)?;
             Ok(ctx.resolve(&result_ty))
         }
-        other => Err(TypeError::new(format!("cannot yet infer type of {other:?}"))),
+        Expr::ArrayLit(rows) => {
+            let inner = ctx.fresh_var();
+            for row in rows {
+                for e in row {
+                    let t = infer(e, env, ctx)?;
+                    ctx.unify(&inner, &t)?;
+                }
+            }
+            Ok(Type::Series(Box::new(ctx.resolve(&inner))))
+        }
+        Expr::DataFrameLit(cols) => {
+            for (_, e) in cols {
+                let t = infer(e, env, ctx)?;
+                let inner = ctx.fresh_var();
+                ctx.unify(&t, &Type::Series(Box::new(inner)))?;
+            }
+            Ok(Type::DataFrame)
+        }
+        Expr::Scope(body) => {
+            let _ = infer(body, env, ctx)?;
+            Ok(Type::Unit)
+        }
+        Expr::Spawn(inner) => {
+            let _ = infer(inner, env, ctx)?;
+            Ok(Type::Unit)
+        }
+        Expr::AppBlock(body) => {
+            let _ = infer(body, env, ctx)?;
+            Ok(Type::Unit)
+        }
     }
 }
 
