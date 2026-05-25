@@ -20,6 +20,7 @@ pub enum TokenKind {
     Str(String),
     Bool(bool),
     Ident(String),
+    Sym(String),
     Keyword(Keyword),
 }
 
@@ -207,6 +208,21 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn lex_symbol(&mut self) -> Token {
+        let start = self.pos;
+        self.pos += 1;
+        let body_start = self.pos;
+        while let Some(b) = self.peek() {
+            if b.is_ascii_alphanumeric() || b == b'_' {
+                self.pos += 1;
+            } else {
+                break;
+            }
+        }
+        let body = self.src[body_start..self.pos].to_string();
+        Token { kind: TokenKind::Sym(body), span: start..self.pos }
+    }
+
     fn lex_string(&mut self) -> Token {
         let start = self.pos;
         self.pos += 1;
@@ -305,6 +321,10 @@ impl Iterator for Lexer<'_> {
             Some(self.lex_number())
         } else if b == b'"' {
             Some(self.lex_string())
+        } else if b == b':'
+            && self.peek_at(1).is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+        {
+            Some(self.lex_symbol())
         } else if b.is_ascii_alphabetic() || b == b'_' {
             Some(self.lex_word())
         } else {
