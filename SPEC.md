@@ -222,7 +222,7 @@ The pipe operator `|>` threads a value through a series of functions:
     |> filter (col :x > 0)
     |> group_by :species
     |> summarize { mu = mean (col :petal_length) }
-    |> plot (aes { x = :species, y = :mu }) + bar ()
+    |> plot (aes { x = :species, y = :mu }) ++ bar ()
 
 `a |> f` is equivalent to `f a`. `|>` is left-associative and has
 lower precedence than function application. Vela has exactly one pipe
@@ -314,7 +314,7 @@ Associativity is left unless noted.
     4. `^`                                       (right-assoc)
     5. `*`  `/`  `%`
     6. `+`  `-`
-    7. `++`                                      (string/series concat)
+    7. `++`                                      (concatenation: strings, series, arrays, plots)
     8. `==`  `!=`  `<`  `<=`  `>`  `>=`
     9. `and`
    10. `or`
@@ -691,21 +691,22 @@ the run manifest of any program that uses `std.time`.
 ### 11.10 Plot (`std.plot`)
 
 A grammar-of-graphics plotting system. A plot is constructed by
-applying `plot` to data and an aesthetic mapping, then adding
-layers, scales, and facets with `+`:
+applying `plot` to data and an aesthetic mapping, then concatenating
+layers, scales, and facets with `++`:
 
     plot df (aes { x = :species, y = :petal_length })
-      + point ()
-      + smooth ()
-      + facet_wrap :site
+      ++ point ()
+      ++ smooth ()
+      ++ facet_wrap :site
 
 Layers: `point`, `line`, `bar`, `box`, `hist`, `density`, `smooth`,
 `errorbar`, `ribbon`, `tile`, `text`. Scales: `scale_x_log`,
 `scale_color_brewer`, and so on. Facets: `facet_wrap`, `facet_grid`.
-The `+` between two `Plot` values is defined by multiple dispatch
-in `std.plot`; it is not the arithmetic `+`. Plots render to SVG,
-PNG, and the native notebook. Rendered output is bit-deterministic
-given the same data and theme.
+The `++` operator is the same concatenation operator used for
+strings, series, and arrays (section 5.11); composing a plot is
+concatenating its layers. Plots render to SVG, PNG, and the native
+notebook. Rendered output is bit-deterministic given the same data
+and theme.
 
 ### 11.11 HTTP (`std.http`)
 
@@ -748,6 +749,44 @@ formatter syntax is positional with `{}` placeholders:
     format "x = {}, y = {}" x y
 
 These functions are re-exported from the prelude.
+
+### 11.14 Datasets (`std.data`)
+
+A small set of well-known datasets is shipped with the standard
+library so that newcomers can experiment, examples in the
+documentation are self-contained, and `vela test` doctests do not
+need network access or filesystem fixtures. Every dataset is a
+`DataFrame` value embedded in the binary as Arrow data; loading is
+zero-copy and the bytes are pinned by the toolchain version, so
+results are bit-identical across machines.
+
+The 1.0 set:
+
+- `iris` — Fisher's irises (150 × 5).
+- `penguins` — Palmer Station penguins, the modern replacement for
+  `iris` (344 × 8).
+- `mtcars` — Motor Trend automobiles (32 × 11).
+- `diamonds` — ggplot2's diamonds (~54k × 10), large enough to
+  demonstrate group-by and join performance.
+- `airquality` — New York City air quality, 1973 (153 × 6).
+- `USArrests` — violent-crime rates by US state (50 × 4).
+- `anscombe` — Anscombe's quartet (11 × 8), four datasets with
+  identical summary statistics and different shapes.
+- `titanic` — passenger survival on the RMS Titanic (891 × 12).
+- `faithful` — Old Faithful geyser eruptions (272 × 2).
+- `trees` — black cherry trees (31 × 3).
+
+    import std.data
+
+    let df = data.iris
+    let stats =
+        df
+        |> group_by :species
+        |> summarize { mu = mean (col :petal_length) }
+
+Each dataset's name, schema, source, and licensing are listed in
+`vela doc std.data`. Datasets are immutable; mutating operations
+return new `DataFrame` values.
 
 ## 12. Tooling
 
@@ -1109,7 +1148,7 @@ have changed. Cells without dependents are pruned.
         let sample     = df |> head n
 
         output table   = sample
-        output hist    = plot sample (aes { x = :x }) + hist ()
+        output hist    = plot sample (aes { x = :x }) ++ hist ()
         output summary = format "rows = {}, cols = {}" sample.rows sample.cols
 
 The cell language is the rest of Vela; an app cell is an expression
