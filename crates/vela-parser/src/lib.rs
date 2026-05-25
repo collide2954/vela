@@ -14,7 +14,15 @@ pub enum Stmt {
     Mutate { name: String, body: Expr },
     For { binding: String, iter: Expr, body: Expr },
     TypeDecl(TypeDecl),
+    Import { path: Vec<String>, kind: ImportKind, public: bool },
     Expr(Expr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportKind {
+    All,
+    Items(Vec<String>),
+    Alias(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,6 +242,15 @@ impl Parser {
                 let body = self.parse_body_after_block_intro()?;
                 Ok(Stmt::For { binding, iter, body })
             }
+            Some(TokenKind::Keyword(Keyword::Pub)) => {
+                self.bump();
+                if matches!(self.peek(), Some(TokenKind::Keyword(Keyword::Import))) {
+                    self.parse_import(true)
+                } else {
+                    Err(ParseError::new("`pub` only modifies `import` for now"))
+                }
+            }
+            Some(TokenKind::Keyword(Keyword::Import)) => self.parse_import(false),
             Some(TokenKind::Keyword(Keyword::Type)) => {
                 self.bump();
                 let name = self.expect_ident()?;
@@ -262,6 +279,42 @@ impl Parser {
                 }
             }
         }
+    }
+
+    fn parse_import(&mut self, public: bool) -> Result<Stmt, ParseError> {
+        self.bump();
+        let first = self.expect_ident()?;
+        let mut path = vec![first];
+        while matches!(self.peek(), Some(TokenKind::Op(Op::Dot))) {
+            self.bump();
+            path.push(self.expect_ident()?);
+        }
+        let kind = match self.peek() {
+            Some(TokenKind::Punct(Punct::LParen)) => {
+                self.bump();
+                let mut items = Vec::new();
+                if !matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
+                    loop {
+                        items.push(self.expect_ident()?);
+                        if !matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                            break;
+                        }
+                        self.bump();
+                        if matches!(self.peek(), Some(TokenKind::Punct(Punct::RParen))) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(&TokenKind::Punct(Punct::RParen))?;
+                ImportKind::Items(items)
+            }
+            Some(TokenKind::Keyword(Keyword::As)) => {
+                self.bump();
+                ImportKind::Alias(self.expect_ident()?)
+            }
+            _ => ImportKind::All,
+        };
+        Ok(Stmt::Import { path, kind, public })
     }
 
     fn parse_type_decl_body(&mut self) -> Result<TypeDeclBody, ParseError> {
