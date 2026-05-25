@@ -706,12 +706,14 @@ impl Parser {
         match self.peek() {
             Some(TokenKind::Ident(_)) => {
                 let name = self.expect_ident()?;
-                Ok(Ty::Con(name))
+                let con = Ty::Con(name);
+                self.maybe_bracket_type_app(con)
             }
             Some(TokenKind::Punct(Punct::Tick)) => {
                 self.bump();
                 let name = self.expect_ident()?;
-                Ok(Ty::Var(name))
+                let var = Ty::Var(name);
+                self.maybe_bracket_type_app(var)
             }
             Some(TokenKind::Punct(Punct::LParen)) => {
                 self.bump();
@@ -750,6 +752,35 @@ impl Parser {
             }
             other => Err(ParseError::new(format!("expected type, found {other:?}"))),
         }
+    }
+
+    fn maybe_bracket_type_app(&mut self, base: Ty) -> Result<Ty, ParseError> {
+        if !matches!(self.peek(), Some(TokenKind::Punct(Punct::LBracket))) {
+            return Ok(base);
+        }
+        self.bump();
+        let mut args = Vec::new();
+        if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBracket))) {
+            self.bump();
+            return Ok(Ty::App(Box::new(base), args));
+        }
+        loop {
+            if matches!(self.peek(), Some(TokenKind::Int(_))) {
+                self.bump();
+                args.push(Ty::Con("_dim".into()));
+            } else {
+                args.push(self.parse_type()?);
+            }
+            if !matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                break;
+            }
+            self.bump();
+            if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBracket))) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::Punct(Punct::RBracket))?;
+        Ok(Ty::App(Box::new(base), args))
     }
 
     fn parse_type_record_fields(&mut self) -> Result<Vec<(String, Ty)>, ParseError> {
