@@ -1,6 +1,6 @@
 # The Vela Language Specification
 
-Status: draft, version 0.2.
+Status: draft, version 0.3.
 Target: Vela 1.0.
 License: Apache-2.0.
 
@@ -32,9 +32,10 @@ narrow enough to permit only one obvious way to express most ideas.
 
 1. Vela is not a systems language. It does not expose manual memory
    management, raw pointers, or unsafe casts.
-2. Vela is not a general-purpose application platform. It is tuned for
-   numerical, tabular, and statistical work. Web servers, GUIs, and
-   game engines are out of scope for the standard library.
+2. Vela is tuned for numerical, tabular, and statistical work. GUIs
+   and game engines are out of scope for the standard library. Web
+   servers and interactive data applications are in scope, because
+   sharing analyses is part of doing analysis.
 3. Vela does not attempt to be backwards-compatible with R, Python,
    Julia, MATLAB, or Octave at the language level. Interop with their
    ecosystems is provided through data formats and the C ABI, not
@@ -75,6 +76,21 @@ by `vela fmt`, is four spaces.
 Comments begin with `#` and run to the end of the line. There are no
 block comments.
 
+Documentation comments use `///` immediately above the item they
+document and `//!` at the top of a file to document the module:
+
+    //! Descriptive statistics for Series and DataFrame columns.
+
+    /// Compute the arithmetic mean of a Series of Float.
+    ///
+    /// ```
+    /// assert mean [1.0, 2.0, 3.0] == Ok 2.0
+    /// ```
+    pub let mean xs = ...
+
+Doc comments are Markdown. Fenced code blocks are extracted and run
+as doctests by `vela test`.
+
 Identifiers begin with a Unicode letter or underscore and continue
 with letters, digits, or underscore. Identifiers are case-sensitive.
 By convention values and functions are `snake_case`, types and
@@ -92,10 +108,13 @@ Numeric literals:
     10n         # BigInt (arbitrary precision); suffix `n`
     1.50d       # Decimal (arbitrary precision base-10); suffix `d`
 
-A literal without a suffix takes the smallest type that exactly fits
-the written form: integer literals default to `Int`, decimal literals
-default to `Float`. Suffixed literals never overflow at parse time;
-`10n ** 100` is well-formed and exact.
+Unsuffixed numeric literals are polymorphic at the call site. An
+integer literal unifies with `Int`, `UInt`, `BigInt`, `Float`, or
+`Decimal`; a decimal literal unifies with `Float` or `Decimal`. In
+isolation a literal defaults to `Int` or `Float`. Once a literal is
+bound to a name, the name has a concrete type; `let n = 1` gives
+`n : Int`, and `n + 1.0` is a type error. Suffixed literals never
+overflow at parse time; `10n ^ 100` is well-formed and exact.
 
 String literals are double-quoted and support the usual escapes:
 
@@ -109,10 +128,11 @@ Symbol literals begin with a colon and name a column or key:
 Boolean literals are `true` and `false`. The unit value is written
 `()`.
 
-Reserved words: `let`, `var`, `fn`, `if`, `else`, `match`, `with`,
-`type`, `trait`, `impl`, `for`, `in`, `return`, `pub`, `module`,
-`import`, `as`, `where`, `scope`, `spawn`, `true`, `false`, `and`,
-`or`, `not`.
+Reserved words: `let`, `var`, `fn`, `if`, `then`, `else`, `match`,
+`with`, `when`, `type`, `trait`, `impl`, `for`, `in`, `return`,
+`pub`, `module`, `import`, `as`, `where`, `scope`, `spawn`,
+`extern`, `open`, `app`, `input`, `output`, `tests`, `test`,
+`prop`, `true`, `false`, `and`, `or`, `not`.
 
 ## 5. Syntax
 
@@ -164,13 +184,25 @@ extensions for multiple dispatch and row polymorphism on records.
     | Err _ -> 0.0
 
 `match` is exhaustive; non-exhaustive matches are a compile-time
-error. The wildcard pattern is `_`. Patterns may bind variables,
-destructure records and tuples, and guard with `when`:
+error. Patterns include:
+
+- Literals (`0`, `"abc"`, `true`).
+- Variable bindings (`x`) and the wildcard `_`.
+- Constructor patterns (`Some x`, `Circle r`, `Point { x, y }`).
+- Tuple patterns (`(a, b, c)`).
+- List patterns: `[]`, `[x]`, `[x, y]`, and `[x, ..rest]` for
+  head-and-tail destructuring.
+- Range patterns: `1..=10` for inclusive numeric ranges.
+- Or-patterns: `Red | Blue -> "primary"`.
+- As-bindings: `Circle r as c when r > 0.0 -> area c`.
+- Guards: `pattern when expr -> body`.
+
+Example:
 
     match shape with
-    | Circle r when r > 0.0 -> area_circle r
-    | Square s              -> s * s
-    | _                     -> 0.0
+    | Circle r as c when r > 0.0 -> area c
+    | Square s | Rect { width = s, height = s } -> s * s
+    | _                                          -> 0.0
 
 ### 5.5 Records and tuples
 
@@ -190,7 +222,7 @@ The pipe operator `|>` threads a value through a series of functions:
     |> filter (col :x > 0)
     |> group_by :species
     |> summarize { mu = mean (col :petal_length) }
-    |> plot (aes x: species, y: mu) + bar ()
+    |> plot (aes { x = :species, y = :mu }) + bar ()
 
 `a |> f` is equivalent to `f a`. `|>` is left-associative and has
 lower precedence than function application. Vela has exactly one pipe
@@ -218,13 +250,82 @@ distinguish the constructors lexically so type inference is local.
 The `~` operator is built into the grammar and produces a value of
 type `Formula`:
 
-    let m = lm (y ~ x1 + x2 * x3, data = df)
+    let m = lm { formula = y ~ x1 + x2 * x3, data = df }
 
 A formula is a syntactic object, not a string. The compiler parses
-it, the standard library interprets it. The full grammar of formulas
-is given in section 11.4.
+it, the standard library interprets it. Functions that take many
+named parameters (like `lm`) accept a record; this is the canonical
+way to express named arguments in Vela. The full grammar of
+formulas is given in section 11.4.
 
-### 5.9 Modules and imports
+### 5.9 Iteration
+
+Transformations are written as pipelines of pure operations:
+
+    let positives = xs |> filter (x > 0)
+    let total     = xs |> sum
+
+For effectful iteration (printing, accumulating into a `var`, calling
+an IO function for each element), Vela provides a `for` form:
+
+    for x in xs:
+        println x
+
+    var total = 0
+    for x in xs:
+        total <- total + x
+
+`for` requires its body to evaluate to `()`; it is for side effects.
+Anything that returns a value should be expressed with `map`,
+`filter`, `fold`, or `summarize`. Vela has no `while` or `loop`
+forms; unbounded iteration is expressed with `Stream.unfold` or
+explicit recursion.
+
+### 5.10 Closures
+
+Anonymous functions capture their enclosing bindings by value. Because
+`let` is immutable, a captured binding cannot be observed to change
+after capture. A closure that needs to read a mutable slot must
+capture a `var`, in which case the closure holds the slot itself and
+the mutation is visible to both the closure and the enclosing scope.
+
+    let x = 10
+    let f = fn () -> x + 1
+    # f is a closure over x by value; x cannot be rebound
+
+    var counter = 0
+    let inc = fn () -> counter <- counter + 1
+    inc ()
+    inc ()
+    # counter is now 2
+
+There are no capture lists, no reference/value markers, and no
+lifetimes. Closures are values and can be returned, stored, and
+passed freely.
+
+### 5.11 Operator precedence
+
+Precedence runs from tightest (top) to loosest (bottom).
+Associativity is left unless noted.
+
+    1. Field access `.`, function application (juxtaposition)
+    2. Postfix `?`
+    3. Prefix `-`, prefix `not`
+    4. `^`                                       (right-assoc)
+    5. `*`  `/`  `%`
+    6. `+`  `-`
+    7. `++`                                      (string/series concat)
+    8. `==`  `!=`  `<`  `<=`  `>`  `>=`
+    9. `and`
+   10. `or`
+   11. `~`                                       (formula)
+   12. `|>`
+
+There are no user-defined operators. The standard library may not add
+operator symbols; it adds functions instead. New operator symbols
+are a language change and require a specification update.
+
+### 5.12 Modules and imports
 
 A file is a module. The path of the file (relative to `src/`)
 determines its module path. Modules export only items marked `pub`.
@@ -321,6 +422,67 @@ internal conditions (out-of-memory, stack overflow), and the standard
 library functions that assert invariants document those aborts.
 Aborts terminate the process; they are not catchable.
 
+### 6.5 Type declarations
+
+User-defined types are introduced with `type`. The same form covers
+sum types (algebraic data types), nominal records, and newtypes:
+
+    type Shape =
+        | Circle Float
+        | Square Float
+        | Rect   { width : Float, height : Float }
+
+    type Point = { x : Float, y : Float }
+
+    type Email = Email String
+
+A `type` with `|` alternatives is a sum type; each alternative is a
+constructor that takes positional or record arguments. A `type` with
+a single record body is a nominal record (distinct from structural
+records of the same shape). A `type` with a single named
+constructor wrapping one value is the idiomatic newtype.
+
+Parametric types are written with type-variable parameters:
+
+    type Tree 'a =
+        | Leaf
+        | Node (Tree 'a) 'a (Tree 'a)
+
+Vela does not have type aliases distinct from `type`. A name binding
+to an existing type is written as a newtype; opaque-vs-transparent is
+controlled by whether the constructor is `pub`.
+
+### 6.6 Equality, ordering, hashing, and display
+
+Every type automatically implements `Eq`, `Ord`, `Hash`, and `Show`.
+These implementations are derived from the structure of the type:
+
+- `Eq` is structural equality. Records compare field by field; sums
+  compare constructor and then payload; collections compare
+  element-wise.
+- `Ord` is the lexicographic order induced by field/constructor
+  order in the declaration.
+- `Hash` is consistent with `Eq`.
+- `Show` produces the canonical Vela textual form. For built-in
+  types the form parses back to an equal value; for user types it is
+  the constructor name followed by arguments.
+
+The autoderivations may be overridden with an explicit `impl`:
+
+    type Person = { name : String, age : Int }
+
+    impl Show Person =
+        fn show p = format "{} ({})" p.name p.age
+
+`Float` equality follows IEEE 754: `NaN != NaN`. `Float` ordering
+puts `NaN` last. These choices are part of the spec and do not vary
+across platforms.
+
+`DataFrame` equality is structural over columns and rows; column
+order matters. `==` on two `DataFrame` values larger than a runtime
+threshold is permitted to use parallel comparison subject to the
+determinism rules in section 9.
+
 ## 7. Evaluation and execution
 
 Vela source is compiled to a register-based bytecode and executed by
@@ -360,9 +522,11 @@ completes:
         spawn (load "a.csv")
         spawn (load "b.csv")
 
-A scope's value is the tuple of its spawned tasks' results, in
-spawn order. Failures inside a scope propagate to the scope's
-result.
+A scope's value is the tuple of its spawned tasks' return values, in
+spawn order. If a spawned task returns a `Result`, that `Result`
+appears as-is in the tuple; the surrounding code propagates errors
+with `?` like any other `Result`. The runtime guarantees that all
+spawned tasks complete or are cancelled before the scope returns.
 
 Collection operations on Series, DataFrame, and Array
 auto-parallelize when the implementation can prove the operation
@@ -428,9 +592,12 @@ into every module.
 
 ### 11.2 Collections (`std.collection`)
 
-`Series[T]`, `Array[T, n]`, immutable `Map`, immutable `Set`,
-`Range`. Pipeline-friendly operations: `map`, `filter`, `fold`,
-`group_by`, `sort_by`, `zip`, `chunk`, `window`.
+`Series` (written `[T]` in type expressions), `Array[T, n]`,
+immutable `Map`, immutable `Set`, `Range`, and `Stream` for unbounded
+or lazy sequences. Pipeline-friendly operations: `map`, `filter`,
+`fold`, `each`, `group_by`, `sort_by`, `zip`, `chunk`, `window`,
+`head`, `tail`. `Stream.unfold` is the canonical way to build an
+unbounded sequence.
 
 ### 11.3 DataFrame (`std.frame`)
 
@@ -440,6 +607,15 @@ Operations: `select`, `filter`, `mutate`, `group_by`, `summarize`,
 `write_parquet`, `read_arrow`, `write_arrow`. Columns are
 `Series[Option[T]]`; nullability is a property of the column, not a
 sentinel value, and maps directly onto Arrow's validity bitmap.
+
+Columns are accessed in two ways. When the column set is statically
+known, `df.x` returns the column `x` as `[Option[T]]`, type-checked
+at compile time via row polymorphism. When the schema is only known
+at runtime (a CSV with unknown columns, a query result), `df.col :x`
+returns `Result[[Option[T]], ColumnError]`.
+
+    let s : [Option[Float]] = df.x                # static
+    let s = df.col :x?                            # dynamic
 
 Because columns are Arrow arrays in memory, every DataFrame can be
 handed to a Rust extension or an Arrow-aware runtime without copying.
@@ -480,6 +656,12 @@ time series, Bayesian inference. Submodules:
 Each submodule defines a single canonical API. Variants and
 alternative parameterizations are not duplicated.
 
+Missing values are never skipped silently. A statistical function
+that operates on `Series[Option[T]]` does not compile unless the
+caller has either filtered the `None` values out (`filter_some`),
+converted them to a default, or used a `*_skip_none` variant that
+documents the policy explicitly.
+
 ### 11.6 Optimization (`std.optim`)
 
 Unconstrained and constrained optimizers, root finding, automatic
@@ -508,15 +690,64 @@ the run manifest of any program that uses `std.time`.
 
 ### 11.10 Plot (`std.plot`)
 
-A grammar-of-graphics plotting system. The plot grammar:
+A grammar-of-graphics plotting system. A plot is constructed by
+applying `plot` to data and an aesthetic mapping, then adding
+layers, scales, and facets with `+`:
 
-    plot(data, aes(...)) + layer(...) + scale(...) + facet(...)
+    plot df (aes { x = :species, y = :petal_length })
+      + point ()
+      + smooth ()
+      + facet_wrap :site
 
 Layers: `point`, `line`, `bar`, `box`, `hist`, `density`, `smooth`,
 `errorbar`, `ribbon`, `tile`, `text`. Scales: `scale_x_log`,
 `scale_color_brewer`, and so on. Facets: `facet_wrap`, `facet_grid`.
-Plots render to SVG, PNG, and the native notebook. Rendered output is
-bit-deterministic given the same data and theme.
+The `+` between two `Plot` values is defined by multiple dispatch
+in `std.plot`; it is not the arithmetic `+`. Plots render to SVG,
+PNG, and the native notebook. Rendered output is bit-deterministic
+given the same data and theme.
+
+### 11.11 HTTP (`std.http`)
+
+An HTTP client and server with a small router and middleware system.
+Submodules:
+
+- `std.http.client` for outbound requests (`get`, `post`, etc.,
+  returning `Result[Response, HttpError]`).
+- `std.http.server` for inbound requests: a `router` value built up
+  with `get`, `post`, `put`, `delete`, `patch`, and `head`; a
+  `serve` function that binds it to a port.
+- `std.http.middleware` for cross-cutting wraps: `compress`,
+  `log`, `cors`, `static_files`, `signed_cookies`.
+
+Path parameters are bound by `:name` segments. JSON parsing is
+provided by `std.json` and integrates via `Request.json` and
+`Response.json`.
+
+    import std.http as h
+
+    let app =
+        h.router
+        |> h.get  "/users/:id"   (fn req -> ...)
+        |> h.post "/users"       (fn req -> ...)
+        |> h.middleware h.compress
+
+    h.serve app { port = 8080 }
+
+### 11.12 Apps (`std.app`)
+
+A reactive application framework. See section 17 for the full
+description; this module is the API surface used by app authors.
+
+### 11.13 Print (`std.print`)
+
+`print`, `println`, `eprint`, `eprintln`, and `format` consume any
+value implementing `Show` (see section 6.6) and produce text. The
+formatter syntax is positional with `{}` placeholders:
+
+    format "x = {}, y = {}" x y
+
+These functions are re-exported from the prelude.
 
 ## 12. Tooling
 
@@ -524,23 +755,29 @@ The `vela` binary is the only tool.
 
 ### 12.1 Subcommands
 
-    vela                # REPL
-    vela run FILE       # compile and execute
-    vela build          # build the current project
-    vela test           # run tests
-    vela fmt            # format
-    vela check          # lint and type-check
-    vela add SPEC       # add a dependency
-    vela update         # update lockfile
-    vela doc            # generate documentation
-    vela bench          # run benchmarks
-    vela notebook       # serve the notebook UI
-    vela lsp            # language server (stdio)
-    vela kernel         # Jupyter kernel
-    vela profile FILE   # sampling profiler
-    vela history        # list past runs from .vela/runs/
-    vela diff-runs A B  # compare two recorded runs
-    vela new NAME       # scaffold a new project
+    vela                  # REPL
+    vela run FILE         # compile and execute
+    vela build            # build the current project
+    vela test             # run tests
+    vela fmt              # format
+    vela check            # lint and type-check
+    vela explain CODE     # show the long form of a diagnostic
+    vela add NAME         # add a dependency
+    vela update           # update lockfile
+    vela vendor           # copy resolved dependencies into vendor/
+    vela doc              # generate documentation
+    vela bench            # run benchmarks
+    vela notebook         # serve the notebook UI
+    vela app new NAME     # scaffold a reactive app
+    vela app serve        # serve the app in dev mode (hot reload)
+    vela app build        # bundle the app as a single binary
+    vela lsp              # language server (stdio)
+    vela kernel           # Jupyter kernel
+    vela profile FILE     # sampling profiler
+    vela history          # list past runs from .vela/runs/
+    vela diff-runs A B    # compare two recorded runs
+    vela cache prune      # remove old build-cache entries
+    vela new NAME         # scaffold a new project
 
 There are no flags for stylistic choices. `vela fmt` has no options.
 `vela check` has no configuration file. The toolchain is opinionated
@@ -553,6 +790,33 @@ invoked with `--json` and human-oriented output otherwise. Colors are
 on when stdout is a TTY and disabled otherwise; `NO_COLOR` is
 respected. Exit codes are documented per subcommand and stable
 across patch versions.
+
+### 12.3 Formatter rules
+
+`vela fmt` is opinionated and has no options. The rules are:
+
+- Four-space indentation. Tabs are an error.
+- 100-column soft limit; lines exceeding the limit are wrapped at
+  the lowest-precedence operator.
+- One blank line between top-level items; no blank lines within an
+  expression block.
+- Trailing commas on every multi-line list, record, and DataFrame
+  literal.
+- Pipelines break before `|>` and align continuations to the value
+  position.
+- Match arms align the `|` and `->` symbols within a single match.
+- Imports are grouped (stdlib, dependencies, local) and sorted
+  alphabetically within each group.
+
+### 12.4 Build cache
+
+Each compilation unit is written to `.vela/cache/<hh>/<hash>`,
+where the hash is computed over the canonical source bytes, the
+direct and transitive dependency hashes, and the toolchain version.
+Reusing a cache entry is safe across machines for the same
+toolchain. `vela build --clean` removes the cache for the current
+project; `vela cache prune` removes cache entries older than a
+configurable age.
 
 ## 13. Diagnostics
 
@@ -619,7 +883,30 @@ permits translation, but no translations ship in 1.0.
 
 ## 14. Packages
 
-A project is a directory containing `vela.toml`. The manifest:
+A project is a directory containing `vela.toml`. The conventional
+layout is:
+
+    my_pkg/
+        vela.toml
+        vela.lock
+        src/
+            lib.vela       # library entry point (if a library)
+            main.vela      # binary entry point (if a binary)
+            other.vela     # additional modules
+            sub/
+                module.vela
+        tests/
+            integration.vela
+        examples/
+            usage.vela
+
+A package may be a library (`src/lib.vela` only), a binary
+(`src/main.vela` only), or both. Other `.vela` files under `src/`
+are private modules of the library; a module becomes part of the
+library's public surface by being re-exported from `lib.vela` with
+`pub import`.
+
+The manifest:
 
     [package]
     name    = "my_analysis"
@@ -632,6 +919,9 @@ A project is a directory containing `vela.toml`. The manifest:
 
     [dev-deps]
     quickcheck = { git = "https://github.com/vela-lang/quickcheck", tag = "v0.4.0" }
+
+    [reproducibility]
+    offline = false        # true requires vendor/ for all deps
 
 A package containing Rust code adds a `rust/` subdirectory with its
 own `Cargo.toml`. The Rust crate is built and linked automatically
@@ -790,7 +1080,80 @@ Notebook output cells store the bit-identical result of the last
 execution. A notebook can be re-evaluated and the output diffed
 against the stored result to detect reproducibility regressions.
 
-## 17. Testing
+## 17. Apps
+
+`std.app` is Vela's reactive application framework, the equivalent
+of Shiny for R. Apps are written in pure Vela, rendered on the
+server, and delivered to the browser through a thin runtime that
+swaps DOM nodes over a websocket. The app author writes no
+JavaScript and no HTML templates.
+
+### 17.1 Reactive cells
+
+An app is an `app = ...` block containing three kinds of cells.
+
+- `input name = widget { ... }` declares a piece of user state
+  bound to a widget (slider, text box, file picker, dropdown).
+- `let name = expr` declares an intermediate derivation.
+- `output name = expr` declares a value to render in the page.
+
+Each cell is a node in a dependency graph. The runtime tracks which
+cells read which inputs and re-evaluates only the cells whose inputs
+have changed. Cells without dependents are pruned.
+
+    app =
+        input n        = slider     { min = 1, max = 1000, default = 100 }
+        input dataset  = file_picker { accept = [".csv"] }
+
+        let df         = read_csv dataset?
+        let sample     = df |> head n
+
+        output table   = sample
+        output hist    = plot sample (aes { x = :x }) + hist ()
+        output summary = format "rows = {}, cols = {}" sample.rows sample.cols
+
+The cell language is the rest of Vela; an app cell is an expression
+of any type that has a `Show` implementation or a built-in renderer
+(`DataFrame`, `Plot`, `String`, primitives).
+
+### 17.2 Determinism and reproducibility
+
+Cells are pure functions of their inputs. The runtime guarantees
+that two evaluations with the same input values produce the same
+output bytes. This is the determinism rule from section 9 applied
+to the app: a recorded session can be replayed and the rendered
+output diffed against the recording.
+
+### 17.3 Sessions and auth
+
+`std.http.middleware.signed_cookies` provides cookie-backed
+sessions; the cookie value is HMAC-signed with a per-app secret.
+`std.app.session` exposes the current session to cells. OAuth2
+callback handling is provided by `std.app.oauth2` for a single
+provider per app; multiple-provider flows are an application
+concern.
+
+### 17.4 Dev mode and deployment
+
+`vela app serve` serves the app in development mode: on every save
+the runtime re-typechecks, replaces the affected cells, and pushes
+the new state to connected clients without a full reload. State
+that did not change is preserved.
+
+`vela app build` produces a single self-contained binary that
+embeds the runtime, the cached bytecode, and the static assets. The
+binary takes the same configuration as `vela app serve` at runtime.
+There is no separate "build for production" step beyond this.
+
+### 17.5 Limits
+
+The app framework is for interactive analyses and internal tools.
+It is not a general-purpose web framework: it has no routing beyond
+mounting an app at a path, no template language, and no client-side
+state outside of widget values. Authors who need those use
+`std.http` directly.
+
+## 18. Testing
 
 Tests live alongside source in a `tests` block:
 
@@ -812,7 +1175,7 @@ tests use the `prop` form:
 Doctests in `///` documentation comments above public items are
 executed by `vela test` as well.
 
-## 18. Versioning
+## 19. Versioning
 
 Vela follows semantic versioning at the level of language and
 standard library. The bytecode format and JIT are implementation
@@ -822,19 +1185,24 @@ Each `vela.toml` declares an `edition`. Editions group breaking
 language changes; the toolchain supports building any supported
 edition from any compatible toolchain version.
 
-## 19. Bootstrap
+## 20. Bootstrap
 
-Version 0.x ships the compiler, runtime, and core data structures in
-Rust. The standard library beyond the core (everything in `std.stats`,
-`std.plot`, `std.formula`, and most of `std.frame`) is written in
-Vela.
+Version 0.x ships the compiler, runtime, garbage collector, JIT,
+and core data structures in Rust. The standard library beyond the
+core is written in Vela; this includes all of `std.stats`,
+`std.plot`, `std.formula`, the high-level API of `std.frame`,
+`std.app` reactivity, and the `std.http` router and middleware
+layer. The low-level HTTP socket handling, Arrow column storage,
+and the app runtime's DOM-diff layer remain in Rust through their
+respective `vela-sdk` crates.
 
 A subset of the language sufficient to bootstrap the standard
 library is defined as Vela-core and lives in section 5 of this
-document. Vela-core has no formulas, no notebook syntax, and no
-plotting layer; it is what the Rust front-end accepts.
+document. Vela-core has no formulas, no notebook syntax, no
+plotting layer, and no `app =` block; it is what the Rust
+front-end accepts.
 
-## 20. Open questions
+## 21. Open questions
 
 No open questions remain at the level of this document. Decisions
 made during implementation that warrant a specification change are
