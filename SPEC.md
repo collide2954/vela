@@ -1,7 +1,8 @@
 # The Vela Language Specification
 
-Status: draft, version 0.1.
+Status: draft, version 0.2.
 Target: Vela 1.0.
+License: Apache-2.0.
 
 Vela is a programming language for data science, statistics, and analysis.
 It is built around three commitments: correctness, reproducibility, and
@@ -87,6 +88,14 @@ Numeric literals:
     0xff, 0b10  # hex and binary integer literals
     1e-3        # scientific Float
     NaN, Inf    # named Float constants
+    42u         # UInt (u64); suffix `u`
+    10n         # BigInt (arbitrary precision); suffix `n`
+    1.50d       # Decimal (arbitrary precision base-10); suffix `d`
+
+A literal without a suffix takes the smallest type that exactly fits
+the written form: integer literals default to `Int`, decimal literals
+default to `Float`. Suffixed literals never overflow at parse time;
+`10n ** 100` is well-formed and exact.
 
 String literals are double-quoted and support the usual escapes:
 
@@ -236,7 +245,8 @@ language.
 Vela has a sound, static type system with full inference. The type
 language is:
 
-    T ::= Int | Float | Bool | String | Symbol | ()
+    T ::= Int | UInt | BigInt | Float | Decimal
+        | Bool | String | Symbol | ()
         | [T]                       # Series of T
         | Array[T, n]               # n-dimensional array
         | DataFrame                 # heterogeneous tabular
@@ -246,6 +256,13 @@ language is:
         | Option[T] | Result[T, E]
         | C[T1, ..., Tn]            # user-declared constructor
         | 'a                        # type variable
+
+Numeric types do not implicitly convert. `1 + 1.0` is a type error;
+the conversion is written `Float.of_int 1 + 1.0` or, more commonly,
+written as `1.0 + 1.0` at the source. `BigInt` and `Decimal` are
+exact; `Float` is `f64`. The standard library defines explicit
+conversions between every pair of numeric types and documents the
+rounding mode for each one that is not exact.
 
 Type schemes generalize free variables at let-bindings, in the usual
 HM style. Annotations are checked, not inferred-around.
@@ -374,7 +391,14 @@ matching toolchain version:
    not a non-deterministic result.
 4. The build, run, and notebook tools record a manifest of input
    file hashes, RNG seeds, and toolchain version in
-   `.vela/runs/<timestamp>.json`.
+   `.vela/runs/<timestamp>.json`. A SQLite index at
+   `.vela/runs.db` is built and updated on demand by `vela history`
+   and `vela diff-runs`; the JSON files are the source of truth and
+   the index can be rebuilt from them.
+5. The IANA time zone database is vendored with the toolchain.
+   `DateTime` operations on the same input yield identical results
+   regardless of the host's `/usr/share/zoneinfo`. The bundled
+   tzdata version is part of `vela --version` output.
 
 The lockfile `vela.lock` pins:
 
@@ -397,9 +421,10 @@ versioned with the compiler. The major sections are:
 
 ### 11.1 Core (`std.core`)
 
-Primitive types and operations: `Int`, `Float`, `Bool`, `String`,
-`Symbol`, `Option`, `Result`, `Ordering`, conversions, and the
-prelude that is imported by default into every module.
+Primitive types and operations: `Int`, `UInt`, `BigInt`, `Float`,
+`Decimal`, `Bool`, `String`, `Symbol`, `Option`, `Result`,
+`Ordering`, conversions, and the prelude that is imported by default
+into every module.
 
 ### 11.2 Collections (`std.collection`)
 
@@ -409,11 +434,16 @@ prelude that is imported by default into every module.
 
 ### 11.3 DataFrame (`std.frame`)
 
-`DataFrame`, columnar storage backed by typed buffers. Operations:
-`select`, `filter`, `mutate`, `group_by`, `summarize`, `join`,
-`pivot`, `unpivot`, `read_csv`, `write_csv`, `read_parquet`,
-`write_parquet`. Columns are `Series[Option[T]]`; nullability is a
-property of the column, not a sentinel value.
+`DataFrame`, columnar storage backed by Apache Arrow arrays.
+Operations: `select`, `filter`, `mutate`, `group_by`, `summarize`,
+`join`, `pivot`, `unpivot`, `read_csv`, `write_csv`, `read_parquet`,
+`write_parquet`, `read_arrow`, `write_arrow`. Columns are
+`Series[Option[T]]`; nullability is a property of the column, not a
+sentinel value, and maps directly onto Arrow's validity bitmap.
+
+Because columns are Arrow arrays in memory, every DataFrame can be
+handed to a Rust extension or an Arrow-aware runtime without copying.
+The `to_arrow` and `from_arrow` constructors expose this directly.
 
 ### 11.4 Formulas (`std.formula`)
 
@@ -471,7 +501,10 @@ TSV, JSON, JSONL, Parquet, and Arrow IPC are supported in 1.0.
 
 `Instant`, `Duration`, `Date`, `DateTime`, `TimeZone`. All
 operations on `DateTime` require an explicit time zone; there is no
-"naive" datetime.
+"naive" datetime. The IANA time zone database is vendored with the
+toolchain so that `DateTime` arithmetic is reproducible across hosts.
+The bundled tzdata version is recorded in `vela --version` and in
+the run manifest of any program that uses `std.time`.
 
 ### 11.10 Plot (`std.plot`)
 
@@ -487,7 +520,9 @@ bit-deterministic given the same data and theme.
 
 ## 12. Tooling
 
-The `vela` binary is the only tool. Subcommands:
+The `vela` binary is the only tool.
+
+### 12.1 Subcommands
 
     vela                # REPL
     vela run FILE       # compile and execute
@@ -495,7 +530,7 @@ The `vela` binary is the only tool. Subcommands:
     vela test           # run tests
     vela fmt            # format
     vela check          # lint and type-check
-    vela add NAME       # add a dependency
+    vela add SPEC       # add a dependency
     vela update         # update lockfile
     vela doc            # generate documentation
     vela bench          # run benchmarks
@@ -503,14 +538,86 @@ The `vela` binary is the only tool. Subcommands:
     vela lsp            # language server (stdio)
     vela kernel         # Jupyter kernel
     vela profile FILE   # sampling profiler
-    vela publish        # publish a package
+    vela history        # list past runs from .vela/runs/
+    vela diff-runs A B  # compare two recorded runs
     vela new NAME       # scaffold a new project
 
 There are no flags for stylistic choices. `vela fmt` has no options.
 `vela check` has no configuration file. The toolchain is opinionated
 by design.
 
-## 13. Packages
+### 12.2 Output conventions
+
+All `vela` subcommands write machine-parseable output to stdout when
+invoked with `--json` and human-oriented output otherwise. Colors are
+on when stdout is a TTY and disabled otherwise; `NO_COLOR` is
+respected. Exit codes are documented per subcommand and stable
+across patch versions.
+
+## 13. Diagnostics
+
+Diagnostics are a first-class part of the language. Vela's
+benchmark is the diagnostic quality of `rustc`: every error message
+identifies the precise source span, names the rule that was
+violated, shows the surrounding source with carets, and, where
+possible, suggests a fix.
+
+A diagnostic has the following structure:
+
+    error[E0123]: expected `Float`, found `String`
+      --> analysis.vela:14:18
+       |
+    14 |     let m = mean "iris"
+       |                  ^^^^^^ expected a Series of Float here
+       |
+       = note: `mean` has type [Float] -> Float
+       = help: did you mean `mean (df.col :iris)`?
+
+### 13.1 Levels
+
+Diagnostics have four levels: `error`, `warning`, `note`, and
+`help`. `error` is fatal to the current command; `warning` is not.
+`vela check` treats warnings as errors when `--deny-warnings` is
+passed; the default is to surface them and continue.
+
+Every diagnostic carries:
+
+- A stable code (`E0123`, `W0042`) that identifies the rule.
+- A primary span and zero or more labelled secondary spans.
+- A short title, a long explanation, and zero or more suggestions.
+
+The full text of each diagnostic, indexed by code, is shipped in the
+binary and viewable with `vela explain E0123`.
+
+### 13.2 Spans across multiple files
+
+When a diagnostic touches more than one file (for example, a type
+mismatch between a call site and a definition), both files are
+shown with their own gutters and the spans are connected by a
+labelled note.
+
+### 13.3 Suggestions
+
+Suggestions that mechanically transform the source are emitted as
+patches in the JSON output and rendered inline in human output.
+`vela check --fix` applies all unambiguous suggestions.
+
+### 13.4 No untraceable errors
+
+Every error condition in the compiler, runtime, and standard
+library is reachable through a documented code. There are no
+anonymous panics, no `unreachable!` paths surfaced to the user, and
+no errors that lack a span. When the runtime aborts, it produces a
+crash report containing the stack trace, the active task, and a
+bug-report URL.
+
+### 13.5 Internationalization
+
+Diagnostic strings are English in 1.0. The infrastructure
+(structured codes, machine-readable output, externalized strings)
+permits translation, but no translations ship in 1.0.
+
+## 14. Packages
 
 A project is a directory containing `vela.toml`. The manifest:
 
@@ -520,10 +627,11 @@ A project is a directory containing `vela.toml`. The manifest:
     edition = "2026"
 
     [deps]
-    polars-compat = "1.2"
+    stats     = { git = "https://github.com/vela-lang/stats", tag = "v1.2.0" }
+    local_lib = { path = "../local_lib" }
 
     [dev-deps]
-    quickcheck = "0.4"
+    quickcheck = { git = "https://github.com/vela-lang/quickcheck", tag = "v0.4.0" }
 
 A package containing Rust code adds a `rust/` subdirectory with its
 own `Cargo.toml`. The Rust crate is built and linked automatically
@@ -533,17 +641,44 @@ have no `rust/` directory and require no Rust toolchain to build.
 The lockfile `vela.lock` is committed and is the source of truth for
 reproducible builds.
 
-The central registry is `vela.pkg` (the registry URL and protocol are
-defined separately). Packages are content-addressed; the registry
-stores immutable artifacts.
+### 14.1 Dependency sources
 
-## 14. Interop
+Dependencies are resolved from one of three sources:
+
+- `path = "..."` for local packages on disk.
+- `git = "...", tag = "..."` (or `rev`, or `branch`) for git
+  repositories. Tags and branches are resolved to commit SHAs and
+  recorded in `vela.lock`; subsequent builds pin to the SHA.
+- The built-in `std` package, which ships with the toolchain.
+
+There is no central package registry in 1.0. Discoverability is the
+responsibility of curated lists and the community; reproducibility
+is the responsibility of `vela.lock`. A registry may be added in a
+future release as a fourth source without breaking existing
+manifests.
+
+### 14.2 Versioning and resolution
+
+Git tags that match `vN.N.N` are treated as semver versions for the
+purpose of selecting between multiple version constraints in the
+dependency graph. Tags that do not match a semver shape may still be
+used, but only as exact pins (`tag = "..."` with no constraint
+resolution).
+
+### 14.3 Vendoring
+
+`vela vendor` copies every resolved dependency into `vendor/`,
+allowing fully offline reproducible builds. The vendored
+directory is the only acceptable form of dependency for projects
+that declare `reproducibility.offline = true` in `vela.toml`.
+
+## 15. Interop
 
 Rust is Vela's primary interop language. A Vela package may be
 written in pure Vela, in a mix of Vela and Rust, or (less commonly)
 embedded inside a Rust application.
 
-### 14.1 Mixed Vela and Rust packages
+### 15.1 Mixed Vela and Rust packages
 
 A package's layout is:
 
@@ -563,7 +698,7 @@ runtime image for the package. The `rust/` crate must be a
 `cdylib` or `staticlib` crate and must depend on the `vela-sdk`
 crate, which provides the binding macros and types.
 
-### 14.2 The Rust binding surface
+### 15.2 The Rust binding surface
 
 Functions exported from Rust to Vela are written with the
 `#[vela::export]` attribute:
@@ -588,7 +723,7 @@ Vela calls into Rust through the same dispatch machinery as Vela-to-
 Vela calls. There is no separate `extern` syntax for Rust exports;
 they look like ordinary Vela functions at the call site.
 
-### 14.3 Calling Vela from Rust
+### 15.3 Calling Vela from Rust
 
 A Rust crate that embeds the Vela runtime depends on `vela-runtime`
 and constructs a `Runtime` value:
@@ -600,7 +735,7 @@ and constructs a `Runtime` value:
 This path is used by tools, editors, and any host application that
 wants to embed Vela.
 
-### 14.4 C FFI
+### 15.4 C FFI
 
 The C ABI is available through `extern "C"`:
 
@@ -618,22 +753,23 @@ and standard library wrappers around them. C FFI is the fallback for
 libraries with no Rust binding; new bindings should prefer a thin
 Rust crate using `vela-sdk` over a direct `extern "C"`.
 
-### 14.5 Reproducibility considerations
+### 15.5 Reproducibility considerations
 
 Both Rust and C dependencies are pinned by content hash in
-`vela.lock` (see section 13). Rust crates pulled in through `cargo`
+`vela.lock` (see section 14). Rust crates pulled in through `cargo`
 are locked through `cargo`'s lockfile, which `vela.lock` references
 by hash. System libraries linked through `extern "C"` remain
 non-pinned in 1.0 and trigger a `vela check` warning when present in
 a reproducible build.
 
-### 14.6 Data interchange
+### 15.6 Data interchange
 
-Apache Arrow IPC is supported as an on-disk and on-wire data
-interchange format in `std.io`. Zero-copy in-process interop with
-other Arrow-aware runtimes is a 1.x goal, not a 1.0 guarantee.
+Apache Arrow is Vela's in-memory columnar layout (see section 11.3),
+which makes zero-copy interchange with any Arrow-aware runtime free
+within a single process. Arrow IPC is also supported as an on-disk
+and on-wire format in `std.io` for crossing process boundaries.
 
-## 15. Notebook
+## 16. Notebook
 
 `vela notebook` serves a browser-based notebook UI. Notebook files are
 plain Vela files annotated with cell boundaries:
@@ -654,7 +790,7 @@ Notebook output cells store the bit-identical result of the last
 execution. A notebook can be re-evaluated and the output diffed
 against the stored result to detect reproducibility regressions.
 
-## 16. Testing
+## 17. Testing
 
 Tests live alongside source in a `tests` block:
 
@@ -676,7 +812,7 @@ tests use the `prop` form:
 Doctests in `///` documentation comments above public items are
 executed by `vela test` as well.
 
-## 17. Versioning
+## 18. Versioning
 
 Vela follows semantic versioning at the level of language and
 standard library. The bytecode format and JIT are implementation
@@ -686,7 +822,7 @@ Each `vela.toml` declares an `edition`. Editions group breaking
 language changes; the toolchain supports building any supported
 edition from any compatible toolchain version.
 
-## 18. Bootstrap
+## 19. Bootstrap
 
 Version 0.x ships the compiler, runtime, and core data structures in
 Rust. The standard library beyond the core (everything in `std.stats`,
@@ -698,17 +834,8 @@ library is defined as Vela-core and lives in section 5 of this
 document. Vela-core has no formulas, no notebook syntax, and no
 plotting layer; it is what the Rust front-end accepts.
 
-## 19. Open questions
+## 20. Open questions
 
-The following questions remain open and will be resolved before 1.0:
-
-1. The set of supported number types beyond `Int` and `Float`
-   (`UInt`, `BigInt`, `Decimal`).
-2. The exact layout of the run manifest in `.vela/runs/`.
-3. Whether traits can have default methods and, if so, the dispatch
-   rule when a default and an `impl` both apply.
-4. The Arrow IPC integration boundary for 1.0 versus 1.x.
-5. The package registry protocol and authentication model.
-6. Time zone database packaging (system vs vendored).
-
-These questions are tracked in `docs/open-questions/`.
+No open questions remain at the level of this document. Decisions
+made during implementation that warrant a specification change are
+proposed as amendments to this file with a version bump.
