@@ -19,8 +19,16 @@ fn hash_comment_at_eof_skipped() {
 }
 
 #[test]
-fn slash_slash_is_skipped_too() {
-    assert_eq!(kinds("// also a comment\n7"), vec![TokenKind::Int(7)]);
+fn slash_slash_is_not_a_comment() {
+    // Only `#` starts a regular comment per the spec. Bare `//` lexes as
+    // two `/` operators (an error at parse time, but tokenized cleanly).
+    assert_eq!(
+        kinds("//"),
+        vec![
+            TokenKind::Op(vela_lexer::Op::Slash),
+            TokenKind::Op(vela_lexer::Op::Slash),
+        ],
+    );
 }
 
 #[test]

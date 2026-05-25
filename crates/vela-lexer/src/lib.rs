@@ -162,13 +162,6 @@ impl<'a> Lexer<'a> {
                 self.skip_to_eol_keep_newline();
                 continue;
             }
-            if self.peek() == Some(b'/')
-                && self.peek_at(1) == Some(b'/')
-                && !matches!(self.peek_at(2), Some(b'/') | Some(b'!'))
-            {
-                self.skip_to_eol_keep_newline();
-                continue;
-            }
             break;
         }
     }
@@ -193,17 +186,6 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                 }
                 Some(b'#') => {
-                    while let Some(b) = self.peek() {
-                        self.pos += 1;
-                        if b == b'\n' {
-                            break;
-                        }
-                    }
-                }
-                Some(b'/')
-                    if self.peek_at(1) == Some(b'/')
-                        && !matches!(self.peek_at(2), Some(b'/') | Some(b'!')) =>
-                {
                     while let Some(b) = self.peek() {
                         self.pos += 1;
                         if b == b'\n' {
@@ -284,19 +266,25 @@ impl<'a> Lexer<'a> {
         let b = self.peek()?;
         if b == b'/' && self.peek_at(1) == Some(b'/') {
             let start = self.pos;
-            return match self.peek_at(2) {
+            match self.peek_at(2) {
                 Some(b'/') => {
                     self.pos += 3;
                     let body = self.read_to_eol();
-                    Some(Token { kind: TokenKind::DocComment(body), span: start..self.pos })
+                    return Some(Token {
+                        kind: TokenKind::DocComment(body),
+                        span: start..self.pos,
+                    });
                 }
                 Some(b'!') => {
                     self.pos += 3;
                     let body = self.read_to_eol();
-                    Some(Token { kind: TokenKind::ModDoc(body), span: start..self.pos })
+                    return Some(Token {
+                        kind: TokenKind::ModDoc(body),
+                        span: start..self.pos,
+                    });
                 }
-                _ => unreachable!("// without doc form is skipped by skip_inline_whitespace"),
-            };
+                _ => {}
+            }
         }
         if b.is_ascii_digit() {
             return Some(self.lex_number());
