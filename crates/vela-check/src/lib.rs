@@ -16,6 +16,10 @@ pub enum Type {
     Unit,
     Var(u32),
     Fn(Box<Type>, Box<Type>),
+    Series(Box<Type>),
+    Tuple(Vec<Type>),
+    Record(Vec<(String, Type)>),
+    DataFrame,
 }
 
 impl Type {
@@ -32,6 +36,17 @@ impl Type {
             Type::Unit => "()".into(),
             Type::Var(n) => format!("'t{n}"),
             Type::Fn(a, b) => format!("({} -> {})", a.show(), b.show()),
+            Type::Series(t) => format!("[{}]", t.show()),
+            Type::Tuple(ts) => {
+                let parts: Vec<String> = ts.iter().map(|t| t.show()).collect();
+                format!("({})", parts.join(", "))
+            }
+            Type::Record(fields) => {
+                let parts: Vec<String> =
+                    fields.iter().map(|(n, t)| format!("{n}: {}", t.show())).collect();
+                format!("{{ {} }}", parts.join(", "))
+            }
+            Type::DataFrame => "DataFrame".into(),
         }
     }
 
@@ -97,6 +112,11 @@ impl Ctx {
             Type::Fn(a, b) => {
                 Type::Fn(Box::new(self.resolve(a)), Box::new(self.resolve(b)))
             }
+            Type::Series(t) => Type::Series(Box::new(self.resolve(t))),
+            Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| self.resolve(t)).collect()),
+            Type::Record(fields) => Type::Record(
+                fields.iter().map(|(n, t)| (n.clone(), self.resolve(t))).collect(),
+            ),
             other => other.clone(),
         }
     }
@@ -105,6 +125,9 @@ impl Ctx {
         match self.resolve(t) {
             Type::Var(m) => m == n,
             Type::Fn(a, b) => self.occurs(n, &a) || self.occurs(n, &b),
+            Type::Series(t) => self.occurs(n, &t),
+            Type::Tuple(ts) => ts.iter().any(|t| self.occurs(n, t)),
+            Type::Record(fields) => fields.iter().any(|(_, t)| self.occurs(n, t)),
             _ => false,
         }
     }
@@ -129,6 +152,38 @@ impl Ctx {
             (Type::Fn(a1, b1), Type::Fn(a2, b2)) => {
                 self.unify(&a1, &a2)?;
                 self.unify(&b1, &b2)
+            }
+            (Type::Series(a), Type::Series(b)) => self.unify(&a, &b),
+            (Type::Tuple(a), Type::Tuple(b)) => {
+                if a.len() != b.len() {
+                    return Err(TypeError::new(format!(
+                        "tuple arity mismatch: {} vs {}",
+                        a.len(),
+                        b.len()
+                    )));
+                }
+                for (x, y) in a.iter().zip(b.iter()) {
+                    self.unify(x, y)?;
+                }
+                Ok(())
+            }
+            (Type::Record(a), Type::Record(b)) => {
+                if a.len() != b.len() {
+                    return Err(TypeError::new(format!(
+                        "record field count mismatch: {} vs {}",
+                        a.len(),
+                        b.len()
+                    )));
+                }
+                for ((n1, t1), (n2, t2)) in a.iter().zip(b.iter()) {
+                    if n1 != n2 {
+                        return Err(TypeError::new(format!(
+                            "record field name mismatch: `{n1}` vs `{n2}`"
+                        )));
+                    }
+                    self.unify(t1, t2)?;
+                }
+                Ok(())
             }
             (a, b) => Err(TypeError::new(format!(
                 "cannot unify {} with {}",
@@ -232,6 +287,67 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             let else_ty = infer(else_b, env, ctx)?;
             ctx.unify(&then_ty, &else_ty)?;
             Ok(ctx.resolve(&then_ty))
+        }
+        Expr::Sym(_) => Ok(Type::Symbol),
+        Expr::Series(elems) => {
+            let inner = ctx.fresh_var();
+            for e in elems {
+                let t = infer(e, env, ctx)?;
+                ctx.unify(&inner, &t)?;
+            }
+            Ok(Type::Series(Box::new(ctx.resolve(&inner))))
+        }
+        Expr::Tuple(elems) => {
+            let mut ts = Vec::with_capacity(elems.len());
+            for e in elems {
+                ts.push(infer(e, env, ctx)?);
+            }
+            Ok(Type::Tuple(ts.into_iter().map(|t| ctx.resolve(&t)).collect()))
+        }
+        Expr::Record(fields) => {
+            let mut fts = Vec::with_capacity(fields.len());
+            for (n, e) in fields {
+                let t = infer(e, env, ctx)?;
+                fts.push((n.clone(), ctx.resolve(&t)));
+            }
+            Ok(Type::Record(fts))
+        }
+        Expr::RecordUpdate(base, updates) => {
+            let base_ty = infer(base, env, ctx)?;
+            let base_ty = ctx.resolve(&base_ty);
+            let Type::Record(mut fields) = base_ty else {
+                return Err(TypeError::new(format!(
+                    "record update requires a record, got {}",
+                    base_ty.show()
+                )));
+            };
+            for (n, e) in updates {
+                let t = infer(e, env, ctx)?;
+                let t = ctx.resolve(&t);
+                let Some((_, existing)) = fields.iter_mut().find(|(name, _)| name == n) else {
+                    return Err(TypeError::new(format!(
+                        "record has no field `{n}`"
+                    )));
+                };
+                ctx.unify(existing, &t)?;
+                *existing = ctx.resolve(&t);
+            }
+            Ok(Type::Record(fields))
+        }
+        Expr::Field(target, name) => {
+            let t = infer(target, env, ctx)?;
+            let t = ctx.resolve(&t);
+            let Type::Record(fields) = &t else {
+                return Err(TypeError::new(format!(
+                    "field access requires a record, got {}",
+                    t.show()
+                )));
+            };
+            fields
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, ty)| ty.clone())
+                .ok_or_else(|| TypeError::new(format!("record has no field `{name}`")))
         }
         Expr::Match(scrut, arms) => {
             let s_ty = infer(scrut, env, ctx)?;
