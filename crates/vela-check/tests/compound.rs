@@ -56,7 +56,7 @@ fn three_element_tuple() {
 fn record_literal() {
     assert_eq!(
         t("{ x = 1, y = 2.0 }"),
-        Type::Record(vec![("x".into(), Type::Int), ("y".into(), Type::Float)]),
+        Type::Record(vec![("x".into(), Type::Int), ("y".into(), Type::Float)], None),
     );
 }
 
@@ -81,6 +81,6 @@ fn symbol_is_symbol() {
 fn series_of_records() {
     assert_eq!(
         t("[{ x = 1 }, { x = 2 }]"),
-        series(Type::Record(vec![("x".into(), Type::Int)])),
+        series(Type::Record(vec![("x".into(), Type::Int)], None)),
     );
 }

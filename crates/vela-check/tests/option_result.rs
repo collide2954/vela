@@ -47,7 +47,7 @@ fn err_of_string() {
 fn option_in_record() {
     assert_eq!(
         t("{ value = Some 1 }"),
-        Type::Record(vec![("value".into(), opt(Type::Int))]),
+        Type::Record(vec![("value".into(), opt(Type::Int))], None),
     );
 }
 

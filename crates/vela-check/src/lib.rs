@@ -18,7 +18,7 @@ pub enum Type {
     Fn(Box<Type>, Box<Type>),
     Series(Box<Type>),
     Tuple(Vec<Type>),
-    Record(Vec<(String, Type)>),
+    Record(Vec<(String, Type)>, Option<Box<Type>>),
     DataFrame,
     Option(Box<Type>),
     Result(Box<Type>, Box<Type>),
@@ -44,10 +44,13 @@ impl Type {
                 let parts: Vec<String> = ts.iter().map(|t| t.show()).collect();
                 format!("({})", parts.join(", "))
             }
-            Type::Record(fields) => {
+            Type::Record(fields, tail) => {
                 let parts: Vec<String> =
                     fields.iter().map(|(n, t)| format!("{n}: {}", t.show())).collect();
-                format!("{{ {} }}", parts.join(", "))
+                match tail {
+                    None => format!("{{ {} }}", parts.join(", ")),
+                    Some(t) => format!("{{ {} | {} }}", parts.join(", "), t.show()),
+                }
             }
             Type::DataFrame => "DataFrame".into(),
             Type::Option(t) => format!("Option[{}]", t.show()),
@@ -139,9 +142,28 @@ impl Ctx {
             }
             Type::Series(t) => Type::Series(Box::new(self.resolve(t))),
             Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| self.resolve(t)).collect()),
-            Type::Record(fields) => Type::Record(
-                fields.iter().map(|(n, t)| (n.clone(), self.resolve(t))).collect(),
-            ),
+            Type::Record(fields, tail) => {
+                let resolved_fields: Vec<(String, Type)> =
+                    fields.iter().map(|(n, t)| (n.clone(), self.resolve(t))).collect();
+                match tail {
+                    None => Type::Record(resolved_fields, None),
+                    Some(t) => {
+                        let resolved_tail = self.resolve(t);
+                        match resolved_tail {
+                            Type::Record(more, more_tail) => {
+                                let mut all = resolved_fields;
+                                for (n, ty) in more {
+                                    if !all.iter().any(|(name, _)| *name == n) {
+                                        all.push((n, ty));
+                                    }
+                                }
+                                Type::Record(all, more_tail)
+                            }
+                            other => Type::Record(resolved_fields, Some(Box::new(other))),
+                        }
+                    }
+                }
+            }
             Type::Option(t) => Type::Option(Box::new(self.resolve(t))),
             Type::Result(a, e) => {
                 Type::Result(Box::new(self.resolve(a)), Box::new(self.resolve(e)))
@@ -151,6 +173,74 @@ impl Ctx {
                 args.iter().map(|t| self.resolve(t)).collect(),
             ),
             other => other.clone(),
+        }
+    }
+
+    fn unify_records(
+        &mut self,
+        fa: &[(String, Type)],
+        ta: Option<&Type>,
+        fb: &[(String, Type)],
+        tb: Option<&Type>,
+    ) -> Result<(), TypeError> {
+        let mut a_only: Vec<(String, Type)> = Vec::new();
+        let mut b_only: Vec<(String, Type)> = Vec::new();
+        for (na, t) in fa {
+            if let Some((_, tb)) = fb.iter().find(|(nb, _)| nb == na) {
+                self.unify(t, tb)?;
+            } else {
+                a_only.push((na.clone(), t.clone()));
+            }
+        }
+        for (nb, t) in fb {
+            if !fa.iter().any(|(na, _)| na == nb) {
+                b_only.push((nb.clone(), t.clone()));
+            }
+        }
+        match (ta, tb) {
+            (None, None) => {
+                if !a_only.is_empty() {
+                    return Err(TypeError::new(format!(
+                        "record missing fields: {:?}",
+                        a_only.iter().map(|(n, _)| n).collect::<Vec<_>>()
+                    )));
+                }
+                if !b_only.is_empty() {
+                    return Err(TypeError::new(format!(
+                        "record has extra fields: {:?}",
+                        b_only.iter().map(|(n, _)| n).collect::<Vec<_>>()
+                    )));
+                }
+                Ok(())
+            }
+            (Some(t_a), None) => {
+                if !a_only.is_empty() {
+                    return Err(TypeError::new(format!(
+                        "record missing fields: {:?}",
+                        a_only.iter().map(|(n, _)| n).collect::<Vec<_>>()
+                    )));
+                }
+                let extension = Type::Record(b_only, None);
+                self.unify(t_a, &extension)
+            }
+            (None, Some(t_b)) => {
+                if !b_only.is_empty() {
+                    return Err(TypeError::new(format!(
+                        "record has extra fields: {:?}",
+                        b_only.iter().map(|(n, _)| n).collect::<Vec<_>>()
+                    )));
+                }
+                let extension = Type::Record(a_only, None);
+                self.unify(t_b, &extension)
+            }
+            (Some(t_a), Some(t_b)) => {
+                let rho = self.fresh_var();
+                let a_ext = Type::Record(b_only, Some(Box::new(rho.clone())));
+                let b_ext = Type::Record(a_only, Some(Box::new(rho)));
+                self.unify(t_a, &a_ext)?;
+                self.unify(t_b, &b_ext)?;
+                Ok(())
+            }
         }
     }
 
@@ -186,7 +276,10 @@ impl Ctx {
             Type::Fn(a, b) => self.occurs(n, &a) || self.occurs(n, &b),
             Type::Series(t) => self.occurs(n, &t),
             Type::Tuple(ts) => ts.iter().any(|t| self.occurs(n, t)),
-            Type::Record(fields) => fields.iter().any(|(_, t)| self.occurs(n, t)),
+            Type::Record(fields, tail) => {
+                fields.iter().any(|(_, t)| self.occurs(n, t))
+                    || tail.as_ref().is_some_and(|t| self.occurs(n, t))
+            }
             Type::Option(t) => self.occurs(n, &t),
             Type::Result(a, e) => self.occurs(n, &a) || self.occurs(n, &e),
             Type::Named(_, args) => args.iter().any(|t| self.occurs(n, t)),
@@ -252,23 +345,8 @@ impl Ctx {
                 }
                 Ok(())
             }
-            (Type::Record(a), Type::Record(b)) => {
-                if a.len() != b.len() {
-                    return Err(TypeError::new(format!(
-                        "record field count mismatch: {} vs {}",
-                        a.len(),
-                        b.len()
-                    )));
-                }
-                for ((n1, t1), (n2, t2)) in a.iter().zip(b.iter()) {
-                    if n1 != n2 {
-                        return Err(TypeError::new(format!(
-                            "record field name mismatch: `{n1}` vs `{n2}`"
-                        )));
-                    }
-                    self.unify(t1, t2)?;
-                }
-                Ok(())
+            (Type::Record(fa, ta), Type::Record(fb, tb)) => {
+                self.unify_records(&fa, ta.as_deref(), &fb, tb.as_deref())
             }
             (a, b) => Err(TypeError::new(format!(
                 "cannot unify {} with {}",
@@ -522,12 +600,12 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
                 let t = infer(e, env, ctx)?;
                 fts.push((n.clone(), ctx.resolve(&t)));
             }
-            Ok(Type::Record(fts))
+            Ok(Type::Record(fts, None))
         }
         Expr::RecordUpdate(base, updates) => {
             let base_ty = infer(base, env, ctx)?;
             let base_ty = ctx.resolve(&base_ty);
-            let Type::Record(mut fields) = base_ty else {
+            let Type::Record(mut fields, tail) = base_ty else {
                 return Err(TypeError::new(format!(
                     "record update requires a record, got {}",
                     base_ty.show()
@@ -544,22 +622,18 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
                 ctx.unify(existing, &t)?;
                 *existing = ctx.resolve(&t);
             }
-            Ok(Type::Record(fields))
+            Ok(Type::Record(fields, tail))
         }
         Expr::Field(target, name) => {
-            let t = infer(target, env, ctx)?;
-            let t = ctx.resolve(&t);
-            let Type::Record(fields) = &t else {
-                return Err(TypeError::new(format!(
-                    "field access requires a record, got {}",
-                    t.show()
-                )));
-            };
-            fields
-                .iter()
-                .find(|(n, _)| n == name)
-                .map(|(_, ty)| ty.clone())
-                .ok_or_else(|| TypeError::new(format!("record has no field `{name}`")))
+            let target_ty = infer(target, env, ctx)?;
+            let field_ty = ctx.fresh_var();
+            let row_tail = ctx.fresh_var();
+            let expected = Type::Record(
+                vec![(name.clone(), field_ty.clone())],
+                Some(Box::new(row_tail)),
+            );
+            ctx.unify(&target_ty, &expected)?;
+            Ok(ctx.resolve(&field_ty))
         }
         Expr::Match(scrut, arms) => {
             let s_ty = infer(scrut, env, ctx)?;
@@ -636,7 +710,7 @@ impl TyTranslator {
                 for (n, t) in fields {
                     translated.push((n.clone(), self.translate(t, ctx)?));
                 }
-                Ok(Type::Record(translated))
+                Ok(Type::Record(translated, None))
             }
             other => Err(TypeError::new(format!("cannot translate type: {other:?}"))),
         }
@@ -651,8 +725,9 @@ fn apply_subst(ty: &Type, subst: &HashMap<u32, Type>) -> Type {
         }
         Type::Series(t) => Type::Series(Box::new(apply_subst(t, subst))),
         Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| apply_subst(t, subst)).collect()),
-        Type::Record(fs) => Type::Record(
+        Type::Record(fs, tail) => Type::Record(
             fs.iter().map(|(n, t)| (n.clone(), apply_subst(t, subst))).collect(),
+            tail.as_ref().map(|t| Box::new(apply_subst(t, subst))),
         ),
         Type::Option(t) => Type::Option(Box::new(apply_subst(t, subst))),
         Type::Result(a, e) => {
@@ -681,8 +756,11 @@ fn collect_ftv(ty: &Type, ctx: &Ctx, out: &mut std::collections::BTreeSet<u32>) 
                 collect_ftv(t, ctx, out);
             }
         }
-        Type::Record(fs) => {
+        Type::Record(fs, tail) => {
             for (_, t) in &fs {
+                collect_ftv(t, ctx, out);
+            }
+            if let Some(t) = tail.as_deref() {
                 collect_ftv(t, ctx, out);
             }
         }

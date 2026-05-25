@@ -8,13 +8,31 @@ ergonomic safety. It draws its type discipline from the ML family
 that discipline through a surface syntax that a working analyst can read
 and write without prior training in type theory.
 
-The full specification lives in [SPEC.md](SPEC.md).
+The full language specification lives in [SPEC.md](SPEC.md).
 
 ## Status
 
-Pre-alpha. The lexer and parser are largely complete; the type checker,
-runtime, and standard library are in progress. Nothing here is stable
-yet.
+Pre-alpha. The lexer, parser, and a substantial type checker (Hindley-
+Milner with let polymorphism, user types, Option/Result, row-polymorphic
+records, pattern matching with guards) are in place. The runtime,
+standard library, formatter, and CLI subcommands are still to come.
+Nothing here is stable.
+
+## A taste
+
+    let standardize (xs : [Float]) : [Float] =
+        let m = mean xs
+        let s = std xs
+        xs |> map (fn x -> (x - m) / s)
+
+    type Shape =
+        | Circle Float
+        | Square Float
+
+    let area shape =
+        match shape with
+        | Circle r -> 3.14159 * r * r
+        | Square s -> s * s
 
 ## Layout
 
@@ -32,7 +50,12 @@ can run it.
     cargo build
     cargo test
 
-A working Rust toolchain (1.85 or later) is required.
+Requires Rust 1.95 or later. There are no other dependencies.
+
+## Contributing
+
+The project is too young to take outside contributions usefully. If you
+have ideas, open an issue.
 
 ## License
 
