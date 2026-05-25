@@ -30,6 +30,7 @@ pub enum Expr {
     Series(Vec<Expr>),
     Field(Box<Expr>, String),
     Tuple(Vec<Expr>),
+    DataFrameLit(Vec<(String, Expr)>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -239,6 +240,29 @@ impl Parser {
         }
     }
 
+    fn parse_dataframe(&mut self) -> Result<Expr, ParseError> {
+        let mut cols = Vec::new();
+        if matches!(self.peek(), Some(TokenKind::Punct(Punct::FrameClose))) {
+            self.bump();
+            return Ok(Expr::DataFrameLit(cols));
+        }
+        loop {
+            let name = self.expect_ident()?;
+            self.expect(&TokenKind::Punct(Punct::Colon))?;
+            let value = self.parse_expr_bp(0)?;
+            cols.push((name, value));
+            if !matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                break;
+            }
+            self.bump();
+            if matches!(self.peek(), Some(TokenKind::Punct(Punct::FrameClose))) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::Punct(Punct::FrameClose))?;
+        Ok(Expr::DataFrameLit(cols))
+    }
+
     fn parse_series(&mut self) -> Result<Expr, ParseError> {
         let mut elems = Vec::new();
         if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBracket))) {
@@ -434,6 +458,7 @@ impl Parser {
             }
             TokenKind::Punct(Punct::LBrace) => self.parse_record(),
             TokenKind::Punct(Punct::LBracket) => self.parse_series(),
+            TokenKind::Punct(Punct::FrameOpen) => self.parse_dataframe(),
             other => Err(ParseError::new(format!("unexpected token: {other:?}"))),
         }
     }
