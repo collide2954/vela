@@ -53,6 +53,14 @@ impl<'a> Lexer<'a> {
 
     fn lex_number(&mut self) -> Token {
         let start = self.pos;
+
+        if self.peek() == Some(b'0') && matches!(self.peek_at(1), Some(b'x' | b'X')) {
+            return self.lex_radix(start, 16);
+        }
+        if self.peek() == Some(b'0') && matches!(self.peek_at(1), Some(b'b' | b'B')) {
+            return self.lex_radix(start, 2);
+        }
+
         let mut buf = String::new();
         let mut is_float = false;
 
@@ -107,6 +115,40 @@ impl<'a> Lexer<'a> {
         } else {
             None
         }
+    }
+
+    fn lex_radix(&mut self, start: usize, radix: u32) -> Token {
+        self.pos += 2;
+        let mut value: u64 = 0;
+        while let Some(b) = self.peek() {
+            let d = match b {
+                b'0'..=b'9' => (b - b'0') as u32,
+                b'a'..=b'f' => (b - b'a' + 10) as u32,
+                b'A'..=b'F' => (b - b'A' + 10) as u32,
+                b'_' => {
+                    self.pos += 1;
+                    continue;
+                }
+                _ => break,
+            };
+            if d >= radix {
+                break;
+            }
+            value = value * u64::from(radix) + u64::from(d);
+            self.pos += 1;
+        }
+        let kind = match self.suffix() {
+            Some(b'u') => {
+                self.pos += 1;
+                TokenKind::UInt(value)
+            }
+            Some(b'n') => {
+                self.pos += 1;
+                TokenKind::BigInt(value.to_string())
+            }
+            _ => TokenKind::Int(value as i64),
+        };
+        Token { kind, span: start..self.pos }
     }
 
     fn eat_digits(&mut self, buf: &mut String) {
