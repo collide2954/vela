@@ -30,6 +30,20 @@ fn main() -> ExitCode {
             };
             check_one(path, &source)
         }
+        "run" => {
+            let Some(path) = args.get(2) else {
+                eprintln!("usage: vela run FILE");
+                return ExitCode::from(2);
+            };
+            let source = match fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("cannot read {path}: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            run_one(path, &source)
+        }
         "explain" => {
             let Some(code) = args.get(2) else {
                 eprintln!("usage: vela explain CODE");
@@ -53,6 +67,35 @@ fn main() -> ExitCode {
         other => {
             eprintln!("unknown subcommand: {other}");
             ExitCode::from(2)
+        }
+    }
+}
+
+fn run_one(path: &str, source: &str) -> ExitCode {
+    match vela_parser::parse_program(source) {
+        Ok(_) => {}
+        Err(e) => {
+            let mut diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+            if let Some(span) = e.span {
+                diag = diag.with_span(span);
+            }
+            eprint!("{}", diag.render(source));
+            return ExitCode::from(1);
+        }
+    }
+    if let Err(e) = vela_check::check_program(source) {
+        let diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+        eprint!("{}", diag.render(source));
+        return ExitCode::from(1);
+    }
+    match vela_eval::run(source) {
+        Ok(v) => {
+            println!("{}", vela_eval::show(&v));
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("runtime error: {}", e.message);
+            ExitCode::from(1)
         }
     }
 }

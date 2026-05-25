@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 vela-check  = { path = "../vela-check" }
 vela-diag   = { path = "../vela-diag" }
+vela-eval   = { path = "../vela-eval" }
 vela-parser = { path = "../vela-parser" }
 
 [lints]
