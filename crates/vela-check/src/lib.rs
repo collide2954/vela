@@ -1,6 +1,7 @@
 //! Type checking and inference for the Vela language.
 
-use vela_parser::{BinOp, Expr, Lit, UnOp, parse_expr};
+use std::collections::HashMap;
+use vela_parser::{BinOp, Expr, Lit, Stmt, UnOp, parse_expr, parse_program};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -49,26 +50,74 @@ impl TypeError {
     }
 }
 
-pub fn check_expr(src: &str) -> Result<Type, TypeError> {
-    let expr = parse_expr(src).map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
-    infer(&expr)
+#[derive(Debug, Default, Clone)]
+pub struct Env {
+    bindings: HashMap<String, Type>,
 }
 
-fn infer(expr: &Expr) -> Result<Type, TypeError> {
+impl Env {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn extend(&self, name: String, ty: Type) -> Env {
+        let mut bindings = self.bindings.clone();
+        bindings.insert(name, ty);
+        Env { bindings }
+    }
+
+    fn lookup(&self, name: &str) -> Option<&Type> {
+        self.bindings.get(name)
+    }
+}
+
+pub fn check_expr(src: &str) -> Result<Type, TypeError> {
+    let expr = parse_expr(src).map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
+    infer(&expr, &Env::new())
+}
+
+pub fn check_program(src: &str) -> Result<Type, TypeError> {
+    let program = parse_program(src)
+        .map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
+    let mut env = Env::new();
+    let mut last = Type::Unit;
+    for stmt in &program.stmts {
+        last = check_stmt(stmt, &mut env)?;
+    }
+    Ok(last)
+}
+
+fn check_stmt(stmt: &Stmt, env: &mut Env) -> Result<Type, TypeError> {
+    match stmt {
+        Stmt::Let { name, params, body, .. } if params.is_empty() => {
+            let ty = infer(body, env)?;
+            *env = env.extend(name.clone(), ty);
+            Ok(Type::Unit)
+        }
+        Stmt::Expr(e) => infer(e, env),
+        other => Err(TypeError::new(format!("cannot yet check {other:?}"))),
+    }
+}
+
+fn infer(expr: &Expr, env: &Env) -> Result<Type, TypeError> {
     match expr {
         Expr::Lit(Lit::Int(_)) => Ok(Type::Int),
         Expr::Lit(Lit::Float(_)) => Ok(Type::Float),
         Expr::Lit(Lit::Str(_)) => Ok(Type::String),
         Expr::Lit(Lit::Bool(_)) => Ok(Type::Bool),
         Expr::Lit(Lit::Unit) => Ok(Type::Unit),
-        Expr::UnaryOp(op, inner) => infer_unary(*op, inner),
-        Expr::BinOp(op, lhs, rhs) => infer_binary(*op, lhs, rhs),
+        Expr::Var(name) => env
+            .lookup(name)
+            .cloned()
+            .ok_or_else(|| TypeError::new(format!("unbound name: {name}"))),
+        Expr::UnaryOp(op, inner) => infer_unary(*op, inner, env),
+        Expr::BinOp(op, lhs, rhs) => infer_binary(*op, lhs, rhs, env),
         other => Err(TypeError::new(format!("cannot yet infer type of {other:?}"))),
     }
 }
 
-fn infer_unary(op: UnOp, inner: &Expr) -> Result<Type, TypeError> {
-    let t = infer(inner)?;
+fn infer_unary(op: UnOp, inner: &Expr, env: &Env) -> Result<Type, TypeError> {
+    let t = infer(inner, env)?;
     match op {
         UnOp::Neg => {
             if t.is_numeric() {
@@ -87,9 +136,9 @@ fn infer_unary(op: UnOp, inner: &Expr) -> Result<Type, TypeError> {
     }
 }
 
-fn infer_binary(op: BinOp, lhs: &Expr, rhs: &Expr) -> Result<Type, TypeError> {
-    let l = infer(lhs)?;
-    let r = infer(rhs)?;
+fn infer_binary(op: BinOp, lhs: &Expr, rhs: &Expr, env: &Env) -> Result<Type, TypeError> {
+    let l = infer(lhs, env)?;
+    let r = infer(rhs, env)?;
     match op {
         BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::Pow => {
             if !l.is_numeric() {
