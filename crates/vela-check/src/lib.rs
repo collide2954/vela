@@ -25,6 +25,7 @@ pub enum Type {
     Option(Box<Type>),
     Result(Box<Type>, Box<Type>),
     Named(String, Vec<Type>),
+    Formula,
 }
 
 impl Type {
@@ -65,6 +66,7 @@ impl Type {
                     format!("{name}[{}]", parts.join(", "))
                 }
             }
+            Type::Formula => "Formula".into(),
         }
     }
 
@@ -574,6 +576,31 @@ fn prelude(ctx: &mut Ctx) -> Env {
         },
     );
 
+    // Stream namespace
+    {
+        let s = ctx.fresh_id();
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "Stream".into(),
+            Scheme {
+                vars: vec![s, a],
+                ty: Type::Record(
+                    vec![("unfold".into(), fn_of(
+                        fn_of(
+                            Type::Var(s),
+                            Type::Option(Box::new(Type::Tuple(vec![
+                                Type::Var(a),
+                                Type::Var(s),
+                            ]))),
+                        ),
+                        fn_of(Type::Var(s), series_of(Type::Var(a))),
+                    ))],
+                    None,
+                ),
+            },
+        );
+    }
+
     // Stats stubs typed for Float series
     env = env.extend(
         "mean".into(),
@@ -891,6 +918,7 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             ctx.unify(&return_ty, &expected_return)?;
             Ok(ctx.resolve(&a))
         }
+        Expr::BinOp(BinOp::Tilde, _, _) => Ok(Type::Formula),
         Expr::BinOp(op, lhs, rhs) => infer_binary(*op, lhs, rhs, env, ctx),
         Expr::Lambda(params, body) => {
             let params: Vec<vela_parser::Param> = params
@@ -1461,8 +1489,6 @@ fn infer_binary(
             ctx.unify(&r, &expected)?;
             Ok(ctx.resolve(&result))
         }
-        BinOp::Tilde => Err(TypeError::new(
-            "`~` (formula) typing requires DataFrame context; not yet implemented",
-        )),
+        BinOp::Tilde => Ok(Type::Formula),
     }
 }
