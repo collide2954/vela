@@ -487,6 +487,73 @@ fn prelude(ctx: &mut Ctx) -> Env {
         },
     );
 
+    // Float namespace
+    env = env.extend(
+        "Float".into(),
+        Scheme {
+            vars: Vec::new(),
+            ty: Type::Record(
+                vec![
+                    ("of_int".into(), fn_of(Type::Int, Type::Float)),
+                    ("to_string".into(), fn_of(Type::Float, Type::String)),
+                ],
+                None,
+            ),
+        },
+    );
+
+    // Int namespace
+    env = env.extend(
+        "Int".into(),
+        Scheme {
+            vars: Vec::new(),
+            ty: Type::Record(
+                vec![
+                    ("of_float".into(), fn_of(Type::Float, Type::Int)),
+                    ("to_string".into(), fn_of(Type::Int, Type::String)),
+                ],
+                None,
+            ),
+        },
+    );
+
+    // Result namespace
+    {
+        let a = ctx.fresh_id();
+        let e = ctx.fresh_id();
+        env = env.extend(
+            "Result".into(),
+            Scheme {
+                vars: vec![a, e],
+                ty: Type::Record(
+                    vec![("unwrap".into(), fn_of(
+                        Type::Result(Box::new(Type::Var(a)), Box::new(Type::Var(e))),
+                        Type::Var(a),
+                    ))],
+                    None,
+                ),
+            },
+        );
+    }
+
+    // Option namespace
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "Option".into(),
+            Scheme {
+                vars: vec![a],
+                ty: Type::Record(
+                    vec![("unwrap".into(), fn_of(
+                        Type::Option(Box::new(Type::Var(a))),
+                        Type::Var(a),
+                    ))],
+                    None,
+                ),
+            },
+        );
+    }
+
     {
         let a = ctx.fresh_id();
         env = env.extend(
