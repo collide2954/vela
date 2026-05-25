@@ -875,18 +875,7 @@ impl TyTranslator {
     ) -> Result<Type, TypeError> {
         match ty {
             vela_parser::Ty::Unit => Ok(Type::Unit),
-            vela_parser::Ty::Con(name) => match name.as_str() {
-                "Int" => Ok(Type::Int),
-                "UInt" => Ok(Type::UInt),
-                "BigInt" => Ok(Type::BigInt),
-                "Float" => Ok(Type::Float),
-                "Decimal" => Ok(Type::Decimal),
-                "Bool" => Ok(Type::Bool),
-                "String" => Ok(Type::String),
-                "Symbol" => Ok(Type::Symbol),
-                "DataFrame" => Ok(Type::DataFrame),
-                other => Err(TypeError::new(format!("unknown type: {other}"))),
-            },
+            vela_parser::Ty::Con(name) => self.translate_con(name, &[], ctx),
             vela_parser::Ty::Var(name) => {
                 if let Some(t) = self.named_vars.get(name) {
                     Ok(t.clone())
@@ -913,7 +902,53 @@ impl TyTranslator {
                 }
                 Ok(Type::Record(translated, None))
             }
-            other => Err(TypeError::new(format!("cannot translate type: {other:?}"))),
+            vela_parser::Ty::App(base, args) => {
+                let name = match base.as_ref() {
+                    vela_parser::Ty::Con(n) => n.clone(),
+                    other => {
+                        return Err(TypeError::new(format!(
+                            "type application base must be a name, got {other:?}"
+                        )));
+                    }
+                };
+                self.translate_con(&name, args, ctx)
+            }
+        }
+    }
+
+    fn translate_con(
+        &mut self,
+        name: &str,
+        args: &[vela_parser::Ty],
+        ctx: &mut Ctx,
+    ) -> Result<Type, TypeError> {
+        let translated_args: Result<Vec<Type>, TypeError> = args
+            .iter()
+            .filter(|a| !matches!(a, vela_parser::Ty::Con(n) if n == "_dim"))
+            .map(|a| self.translate(a, ctx))
+            .collect();
+        let targs = translated_args?;
+        match name {
+            "Int" if targs.is_empty() => Ok(Type::Int),
+            "UInt" if targs.is_empty() => Ok(Type::UInt),
+            "BigInt" if targs.is_empty() => Ok(Type::BigInt),
+            "Float" if targs.is_empty() => Ok(Type::Float),
+            "Decimal" if targs.is_empty() => Ok(Type::Decimal),
+            "Bool" if targs.is_empty() => Ok(Type::Bool),
+            "String" if targs.is_empty() => Ok(Type::String),
+            "Symbol" if targs.is_empty() => Ok(Type::Symbol),
+            "DataFrame" if targs.is_empty() => Ok(Type::DataFrame),
+            "Option" if targs.len() == 1 => Ok(Type::Option(Box::new(targs.into_iter().next().expect("len 1")))),
+            "Result" if targs.len() == 2 => {
+                let mut it = targs.into_iter();
+                let a = it.next().expect("a");
+                let e = it.next().expect("e");
+                Ok(Type::Result(Box::new(a), Box::new(e)))
+            }
+            "Array" if !targs.is_empty() => {
+                Ok(Type::Series(Box::new(targs.into_iter().next().expect("a"))))
+            }
+            other => Ok(Type::Named(other.into(), targs)),
         }
     }
 }
