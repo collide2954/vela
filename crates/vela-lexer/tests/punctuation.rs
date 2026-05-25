@@ -1,7 +1,11 @@
 use vela_lexer::{Op, Punct, TokenKind, lex};
 
 fn kinds(src: &str) -> Vec<TokenKind> {
-    lex(src).map(|t| t.kind).collect()
+    let mut ks: Vec<TokenKind> = lex(src).map(|t| t.kind).collect();
+    while matches!(ks.last(), Some(TokenKind::Newline | TokenKind::Dedent)) {
+        ks.pop();
+    }
+    ks
 }
 
 fn op(o: Op) -> TokenKind {

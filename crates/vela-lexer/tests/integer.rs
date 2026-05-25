@@ -1,7 +1,11 @@
 use vela_lexer::{Token, TokenKind, lex};
 
 fn kinds(src: &str) -> Vec<TokenKind> {
-    lex(src).map(|t| t.kind).collect()
+    let mut ks: Vec<TokenKind> = lex(src).map(|t| t.kind).collect();
+    while matches!(ks.last(), Some(TokenKind::Newline | TokenKind::Dedent)) {
+        ks.pop();
+    }
+    ks
 }
 
 #[test]
@@ -21,7 +25,10 @@ fn integer_with_digit_separators() {
 
 #[test]
 fn integer_span_covers_full_literal() {
-    let toks: Vec<Token> = lex("  42 ").collect();
-    assert_eq!(toks.len(), 1);
-    assert_eq!(toks[0].span, 2..4);
+    let toks: Vec<Token> = lex("42 ").collect();
+    let int_tok = toks
+        .iter()
+        .find(|t| matches!(t.kind, TokenKind::Int(_)))
+        .expect("found an Int token");
+    assert_eq!(int_tok.span, 0..2);
 }

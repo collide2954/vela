@@ -1,7 +1,11 @@
 use vela_lexer::{TokenKind, lex};
 
 fn kinds(src: &str) -> Vec<TokenKind> {
-    lex(src).map(|t| t.kind).collect()
+    let mut ks: Vec<TokenKind> = lex(src).map(|t| t.kind).collect();
+    while matches!(ks.last(), Some(TokenKind::Newline | TokenKind::Dedent)) {
+        ks.pop();
+    }
+    ks
 }
 
 #[test]
@@ -47,6 +51,9 @@ fn string_with_null_escape() {
 #[test]
 fn string_span_includes_quotes() {
     let toks: Vec<_> = lex(r#""hi""#).collect();
-    assert_eq!(toks.len(), 1);
-    assert_eq!(toks[0].span, 0..4);
+    let s = toks
+        .iter()
+        .find(|t| matches!(t.kind, TokenKind::Str(_)))
+        .expect("found a Str token");
+    assert_eq!(s.span, 0..4);
 }

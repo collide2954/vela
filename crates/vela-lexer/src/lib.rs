@@ -1,5 +1,6 @@
 //! Lexical analysis for the Vela language.
 
+use std::collections::VecDeque;
 use std::ops::Range;
 
 pub type Span = Range<usize>;
@@ -26,6 +27,9 @@ pub enum TokenKind {
     Punct(Punct),
     DocComment(String),
     ModDoc(String),
+    Newline,
+    Indent,
+    Dedent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,11 +121,28 @@ pub fn lex(src: &str) -> Lexer<'_> {
 pub struct Lexer<'a> {
     src: &'a str,
     pos: usize,
+    indents: Vec<usize>,
+    paren_depth: usize,
+    pending: VecDeque<Token>,
+    at_line_start: bool,
+    emitted_any: bool,
+    last_was_newline: bool,
+    eof_emitted: bool,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
-        Self { src, pos: 0 }
+        Self {
+            src,
+            pos: 0,
+            indents: vec![0],
+            paren_depth: 0,
+            pending: VecDeque::new(),
+            at_line_start: true,
+            emitted_any: false,
+            last_was_newline: false,
+            eof_emitted: false,
+        }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -132,37 +153,168 @@ impl<'a> Lexer<'a> {
         self.src.as_bytes().get(self.pos + offset).copied()
     }
 
-    fn skip_whitespace(&mut self) {
+    fn skip_inline_whitespace(&mut self) {
         loop {
-            while let Some(b) = self.peek() {
-                if b == b' ' || b == b'\t' {
-                    self.pos += 1;
-                } else {
-                    break;
-                }
+            while matches!(self.peek(), Some(b' ' | b'\t')) {
+                self.pos += 1;
             }
             if self.peek() == Some(b'#') {
-                self.skip_to_eol();
+                self.skip_to_eol_keep_newline();
                 continue;
             }
             if self.peek() == Some(b'/')
                 && self.peek_at(1) == Some(b'/')
                 && !matches!(self.peek_at(2), Some(b'/') | Some(b'!'))
             {
-                self.skip_to_eol();
+                self.skip_to_eol_keep_newline();
                 continue;
             }
             break;
         }
     }
 
-    fn skip_to_eol(&mut self) {
+    fn skip_to_eol_keep_newline(&mut self) {
         while let Some(b) = self.peek() {
-            self.pos += 1;
             if b == b'\n' {
                 break;
             }
+            self.pos += 1;
         }
+    }
+
+    fn skip_blank_lines(&mut self) {
+        loop {
+            let save = self.pos;
+            while matches!(self.peek(), Some(b' ' | b'\t')) {
+                self.pos += 1;
+            }
+            match self.peek() {
+                Some(b'\n') => {
+                    self.pos += 1;
+                }
+                Some(b'#') => {
+                    while let Some(b) = self.peek() {
+                        self.pos += 1;
+                        if b == b'\n' {
+                            break;
+                        }
+                    }
+                }
+                Some(b'/')
+                    if self.peek_at(1) == Some(b'/')
+                        && !matches!(self.peek_at(2), Some(b'/') | Some(b'!')) =>
+                {
+                    while let Some(b) = self.peek() {
+                        self.pos += 1;
+                        if b == b'\n' {
+                            break;
+                        }
+                    }
+                }
+                None => return,
+                _ => {
+                    self.pos = save;
+                    return;
+                }
+            }
+        }
+    }
+
+    fn measure_indent(&mut self) -> usize {
+        let mut width = 0;
+        while let Some(b) = self.peek() {
+            match b {
+                b' ' => {
+                    width += 1;
+                    self.pos += 1;
+                }
+                b'\t' => {
+                    width += 1;
+                    self.pos += 1;
+                }
+                _ => break,
+            }
+        }
+        width
+    }
+
+    fn handle_indent(&mut self) {
+        let indent = self.measure_indent();
+        let top = *self.indents.last().expect("indent stack always non-empty");
+        if indent > top {
+            self.indents.push(indent);
+            self.pending.push_back(self.synthetic(TokenKind::Indent));
+        } else {
+            while *self.indents.last().expect("indent stack always non-empty") > indent {
+                self.indents.pop();
+                self.pending.push_back(self.synthetic(TokenKind::Dedent));
+            }
+        }
+    }
+
+    fn synthetic(&self, kind: TokenKind) -> Token {
+        Token { kind, span: self.pos..self.pos }
+    }
+
+    fn emit_eof_tokens(&mut self) {
+        if self.emitted_any && !self.last_was_newline {
+            self.pending.push_back(self.synthetic(TokenKind::Newline));
+            self.last_was_newline = true;
+        }
+        while self.indents.len() > 1 {
+            self.indents.pop();
+            self.pending.push_back(self.synthetic(TokenKind::Dedent));
+        }
+        self.eof_emitted = true;
+    }
+
+    fn track_paren(&mut self, kind: &TokenKind) {
+        match kind {
+            TokenKind::Punct(
+                Punct::LParen | Punct::LBracket | Punct::LBrace | Punct::ArrayOpen | Punct::FrameOpen,
+            ) => self.paren_depth += 1,
+            TokenKind::Punct(
+                Punct::RParen | Punct::RBracket | Punct::RBrace | Punct::ArrayClose | Punct::FrameClose,
+            ) => {
+                if self.paren_depth > 0 {
+                    self.paren_depth -= 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn lex_one(&mut self) -> Option<Token> {
+        let b = self.peek()?;
+        if b == b'/' && self.peek_at(1) == Some(b'/') {
+            let start = self.pos;
+            return match self.peek_at(2) {
+                Some(b'/') => {
+                    self.pos += 3;
+                    let body = self.read_to_eol();
+                    Some(Token { kind: TokenKind::DocComment(body), span: start..self.pos })
+                }
+                Some(b'!') => {
+                    self.pos += 3;
+                    let body = self.read_to_eol();
+                    Some(Token { kind: TokenKind::ModDoc(body), span: start..self.pos })
+                }
+                _ => unreachable!("// without doc form is skipped by skip_inline_whitespace"),
+            };
+        }
+        if b.is_ascii_digit() {
+            return Some(self.lex_number());
+        }
+        if b == b'"' {
+            return Some(self.lex_string());
+        }
+        if b == b':' && self.peek_at(1).is_some_and(|b| b.is_ascii_alphabetic() || b == b'_') {
+            return Some(self.lex_symbol());
+        }
+        if b.is_ascii_alphabetic() || b == b'_' {
+            return Some(self.lex_word());
+        }
+        self.lex_punct()
     }
 
     fn read_to_eol(&mut self) -> String {
@@ -396,47 +548,7 @@ impl<'a> Lexer<'a> {
         };
         Token { kind, span: start..self.pos }
     }
-}
 
-impl Iterator for Lexer<'_> {
-    type Item = Token;
-
-    fn next(&mut self) -> Option<Token> {
-        self.skip_whitespace();
-        let b = self.peek()?;
-        if b == b'/' && self.peek_at(1) == Some(b'/') {
-            let start = self.pos;
-            return match self.peek_at(2) {
-                Some(b'/') => {
-                    self.pos += 3;
-                    let body = self.read_to_eol();
-                    Some(Token { kind: TokenKind::DocComment(body), span: start..self.pos })
-                }
-                Some(b'!') => {
-                    self.pos += 3;
-                    let body = self.read_to_eol();
-                    Some(Token { kind: TokenKind::ModDoc(body), span: start..self.pos })
-                }
-                _ => unreachable!("// without doc form was skipped by skip_whitespace"),
-            };
-        }
-        if b.is_ascii_digit() {
-            return Some(self.lex_number());
-        }
-        if b == b'"' {
-            return Some(self.lex_string());
-        }
-        if b == b':' && self.peek_at(1).is_some_and(|b| b.is_ascii_alphabetic() || b == b'_') {
-            return Some(self.lex_symbol());
-        }
-        if b.is_ascii_alphabetic() || b == b'_' {
-            return Some(self.lex_word());
-        }
-        self.lex_punct()
-    }
-}
-
-impl Lexer<'_> {
     fn lex_punct(&mut self) -> Option<Token> {
         let start = self.pos;
         let b = self.peek()?;
@@ -512,25 +624,20 @@ impl Lexer<'_> {
                     });
                 }
             }
-            b'<' => {
-                match self.peek_at(1) {
-                    Some(b'-') => {
-                        self.pos += 2;
-                        return Some(Token {
-                            kind: TokenKind::Op(Op::LArrow),
-                            span: start..self.pos,
-                        });
-                    }
-                    Some(b'=') => {
-                        self.pos += 2;
-                        return Some(Token {
-                            kind: TokenKind::Op(Op::Le),
-                            span: start..self.pos,
-                        });
-                    }
-                    _ => kind = Some(TokenKind::Op(Op::Lt)),
+            b'<' => match self.peek_at(1) {
+                Some(b'-') => {
+                    self.pos += 2;
+                    return Some(Token {
+                        kind: TokenKind::Op(Op::LArrow),
+                        span: start..self.pos,
+                    });
                 }
-            }
+                Some(b'=') => {
+                    self.pos += 2;
+                    return Some(Token { kind: TokenKind::Op(Op::Le), span: start..self.pos });
+                }
+                _ => kind = Some(TokenKind::Op(Op::Lt)),
+            },
             b'>' => {
                 if self.peek_at(1) == Some(b'=') {
                     self.pos += 2;
@@ -583,5 +690,55 @@ impl Lexer<'_> {
         }
         self.pos += 1;
         kind.map(|k| Token { kind: k, span: start..self.pos })
+    }
+}
+
+impl Iterator for Lexer<'_> {
+    type Item = Token;
+
+    fn next(&mut self) -> Option<Token> {
+        loop {
+            if let Some(tok) = self.pending.pop_front() {
+                self.last_was_newline = matches!(tok.kind, TokenKind::Newline);
+                if !matches!(tok.kind, TokenKind::Indent | TokenKind::Dedent) {
+                    self.emitted_any = true;
+                }
+                return Some(tok);
+            }
+            if self.eof_emitted {
+                return None;
+            }
+            if self.at_line_start && self.paren_depth == 0 {
+                self.at_line_start = false;
+                self.skip_blank_lines();
+                if self.peek().is_none() {
+                    self.emit_eof_tokens();
+                    continue;
+                }
+                self.handle_indent();
+                continue;
+            }
+            self.skip_inline_whitespace();
+            let Some(b) = self.peek() else {
+                self.emit_eof_tokens();
+                continue;
+            };
+            if b == b'\n' {
+                self.pos += 1;
+                if self.paren_depth == 0 && self.emitted_any && !self.last_was_newline {
+                    self.pending.push_back(self.synthetic(TokenKind::Newline));
+                    self.at_line_start = true;
+                } else if self.paren_depth == 0 {
+                    self.at_line_start = true;
+                }
+                continue;
+            }
+            if let Some(tok) = self.lex_one() {
+                self.track_paren(&tok.kind);
+                self.pending.push_back(tok);
+            } else {
+                self.pos += 1;
+            }
+        }
     }
 }
