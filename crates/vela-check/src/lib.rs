@@ -554,6 +554,54 @@ fn prelude(ctx: &mut Ctx) -> Env {
         );
     }
 
+    // String namespace
+    env = env.extend(
+        "String".into(),
+        Scheme {
+            vars: Vec::new(),
+            ty: Type::Record(
+                vec![
+                    ("length".into(), fn_of(Type::String, Type::Int)),
+                    (
+                        "concat".into(),
+                        fn_of(series_of(Type::String), Type::String),
+                    ),
+                ],
+                None,
+            ),
+        },
+    );
+
+    // Stats stubs typed for Float series
+    env = env.extend(
+        "mean".into(),
+        Scheme {
+            vars: Vec::new(),
+            ty: fn_of(series_of(Type::Float), Type::Float),
+        },
+    );
+    env = env.extend(
+        "std".into(),
+        Scheme {
+            vars: Vec::new(),
+            ty: fn_of(series_of(Type::Float), Type::Float),
+        },
+    );
+    env = env.extend(
+        "min".into(),
+        Scheme {
+            vars: Vec::new(),
+            ty: fn_of(series_of(Type::Float), Type::Float),
+        },
+    );
+    env = env.extend(
+        "max".into(),
+        Scheme {
+            vars: Vec::new(),
+            ty: fn_of(series_of(Type::Float), Type::Float),
+        },
+    );
+
     {
         let a = ctx.fresh_id();
         env = env.extend(
@@ -923,6 +971,11 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
         }
         Expr::Field(target, name) => {
             let target_ty = infer(target, env, ctx)?;
+            let resolved = ctx.resolve(&target_ty);
+            if matches!(resolved, Type::DataFrame) {
+                let inner = ctx.fresh_var();
+                return Ok(Type::Series(Box::new(Type::Option(Box::new(inner)))));
+            }
             let field_ty = ctx.fresh_var();
             let row_tail = ctx.fresh_var();
             let expected = Type::Record(
