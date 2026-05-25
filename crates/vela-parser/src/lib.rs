@@ -540,16 +540,13 @@ const APP_BP: u8 = 25;
 const FIELD_BP: u8 = 28;
 
 fn flatten_block(mut stmts: Vec<Stmt>) -> Expr {
-    if stmts.len() == 1 {
-        if matches!(stmts[0], Stmt::Expr(_)) {
-            if let Stmt::Expr(e) = stmts.pop().expect("nonempty") {
-                return e;
-            }
+    if stmts.len() == 1 && matches!(stmts[0], Stmt::Expr(_)) {
+        if let Some(Stmt::Expr(e)) = stmts.pop() {
+            return e;
         }
     }
     let trailing = if matches!(stmts.last(), Some(Stmt::Expr(_))) {
-        let last = stmts.pop().expect("nonempty");
-        if let Stmt::Expr(e) = last {
+        if let Some(Stmt::Expr(e)) = stmts.pop() {
             Some(Box::new(e))
         } else {
             unreachable!()
