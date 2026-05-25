@@ -138,7 +138,7 @@ impl Default for Ctx {
 
 impl Ctx {
     fn enter_function(&mut self, ret: Type) -> Option<Type> {
-        std::mem::replace(&mut self.expected_return, Some(ret))
+        self.expected_return.replace(ret)
     }
 
     fn exit_function(&mut self, saved: Option<Type>) {

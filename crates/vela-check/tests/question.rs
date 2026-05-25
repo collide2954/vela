@@ -10,11 +10,11 @@ fn t(src: &str) -> Type {
 #[test]
 fn question_on_ok_extracts_inner_inside_lambda() {
     let result = t("fn _ -> Ok ((Ok 5)?)");
-    if let Type::Fn(_, ret) = result {
-        if let Type::Result(a, _) = *ret {
-            assert_eq!(*a, Type::Int);
-            return;
-        }
+    if let Type::Fn(_, ret) = result
+        && let Type::Result(a, _) = *ret
+    {
+        assert_eq!(*a, Type::Int);
+        return;
     }
     panic!("expected Fn returning Result Int");
 }
