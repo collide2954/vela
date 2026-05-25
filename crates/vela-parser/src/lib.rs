@@ -27,6 +27,7 @@ pub enum Expr {
     Match(Box<Expr>, Vec<MatchArm>),
     Record(Vec<(String, Expr)>),
     RecordUpdate(Box<Expr>, Vec<(String, Expr)>),
+    Series(Vec<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -236,6 +237,26 @@ impl Parser {
         }
     }
 
+    fn parse_series(&mut self) -> Result<Expr, ParseError> {
+        let mut elems = Vec::new();
+        if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBracket))) {
+            self.bump();
+            return Ok(Expr::Series(elems));
+        }
+        loop {
+            elems.push(self.parse_expr_bp(0)?);
+            if !matches!(self.peek(), Some(TokenKind::Punct(Punct::Comma))) {
+                break;
+            }
+            self.bump();
+            if matches!(self.peek(), Some(TokenKind::Punct(Punct::RBracket))) {
+                break;
+            }
+        }
+        self.expect(&TokenKind::Punct(Punct::RBracket))?;
+        Ok(Expr::Series(elems))
+    }
+
     fn parse_field_list(&mut self) -> Result<Vec<(String, Expr)>, ParseError> {
         let mut fields = Vec::new();
         loop {
@@ -391,6 +412,7 @@ impl Parser {
                 Ok(inner)
             }
             TokenKind::Punct(Punct::LBrace) => self.parse_record(),
+            TokenKind::Punct(Punct::LBracket) => self.parse_series(),
             other => Err(ParseError::new(format!("unexpected token: {other:?}"))),
         }
     }
