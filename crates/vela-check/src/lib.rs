@@ -540,6 +540,115 @@ fn prelude(ctx: &mut Ctx) -> Env {
             },
         );
     }
+    // head : [a] -> Option a
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "head".into(),
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(series_of(Type::Var(a)), Type::Option(Box::new(Type::Var(a)))),
+            },
+        );
+    }
+    // tail : [a] -> [a]
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "tail".into(),
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(series_of(Type::Var(a)), series_of(Type::Var(a))),
+            },
+        );
+    }
+    // take : Int -> [a] -> [a]
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "take".into(),
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(Type::Int, fn_of(series_of(Type::Var(a)), series_of(Type::Var(a)))),
+            },
+        );
+    }
+    // drop : Int -> [a] -> [a]
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "drop".into(),
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(Type::Int, fn_of(series_of(Type::Var(a)), series_of(Type::Var(a)))),
+            },
+        );
+    }
+    // reverse : [a] -> [a]
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "reverse".into(),
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(series_of(Type::Var(a)), series_of(Type::Var(a))),
+            },
+        );
+    }
+    // append : [a] -> [a] -> [a]
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "append".into(),
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(
+                    series_of(Type::Var(a)),
+                    fn_of(series_of(Type::Var(a)), series_of(Type::Var(a))),
+                ),
+            },
+        );
+    }
+    // zip : [a] -> [b] -> [(a, b)]
+    {
+        let a = ctx.fresh_id();
+        let b = ctx.fresh_id();
+        env = env.extend(
+            "zip".into(),
+            Scheme {
+                vars: vec![a, b],
+                ty: fn_of(
+                    series_of(Type::Var(a)),
+                    fn_of(
+                        series_of(Type::Var(b)),
+                        series_of(Type::Tuple(vec![Type::Var(a), Type::Var(b)])),
+                    ),
+                ),
+            },
+        );
+    }
+    // enumerate : [a] -> [(Int, a)]
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "enumerate".into(),
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(
+                    series_of(Type::Var(a)),
+                    series_of(Type::Tuple(vec![Type::Int, Type::Var(a)])),
+                ),
+            },
+        );
+    }
+    // range : Int -> Int -> [Int]
+    env = env.extend(
+        "range".into(),
+        Scheme {
+            vars: Vec::new(),
+            ty: fn_of(Type::Int, fn_of(Type::Int, series_of(Type::Int))),
+        },
+    );
     // println : a -> ()
     {
         let a = ctx.fresh_id();

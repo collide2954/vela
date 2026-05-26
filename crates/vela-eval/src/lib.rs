@@ -262,6 +262,163 @@ fn prelude() -> Env {
             }))
         }),
     );
+    env = env.extend(
+        "head".into(),
+        builtin1(|v| match v {
+            Value::Series(vs) => Ok(if vs.is_empty() {
+                Value::Cons("None".into(), vec![])
+            } else {
+                Value::Cons("Some".into(), vec![vs[0].clone()])
+            }),
+            other => Err(RuntimeError::new(format!(
+                "head expects a series, got {}",
+                show(&other)
+            ))),
+        }),
+    );
+    env = env.extend(
+        "tail".into(),
+        builtin1(|v| match v {
+            Value::Series(vs) => {
+                if vs.is_empty() {
+                    Ok(Value::Series(vec![]))
+                } else {
+                    Ok(Value::Series(vs.into_iter().skip(1).collect()))
+                }
+            }
+            other => Err(RuntimeError::new(format!(
+                "tail expects a series, got {}",
+                show(&other)
+            ))),
+        }),
+    );
+    env = env.extend(
+        "take".into(),
+        builtin1(|n| {
+            let Value::Int(k) = n else {
+                return Err(RuntimeError::new(format!(
+                    "take expects Int count, got {}",
+                    show(&n)
+                )));
+            };
+            Ok(builtin1(move |xs| match xs {
+                Value::Series(vs) => Ok(Value::Series(
+                    vs.into_iter().take(k.max(0) as usize).collect(),
+                )),
+                other => Err(RuntimeError::new(format!(
+                    "take expects a series, got {}",
+                    show(&other)
+                ))),
+            }))
+        }),
+    );
+    env = env.extend(
+        "drop".into(),
+        builtin1(|n| {
+            let Value::Int(k) = n else {
+                return Err(RuntimeError::new(format!(
+                    "drop expects Int count, got {}",
+                    show(&n)
+                )));
+            };
+            Ok(builtin1(move |xs| match xs {
+                Value::Series(vs) => Ok(Value::Series(
+                    vs.into_iter().skip(k.max(0) as usize).collect(),
+                )),
+                other => Err(RuntimeError::new(format!(
+                    "drop expects a series, got {}",
+                    show(&other)
+                ))),
+            }))
+        }),
+    );
+    env = env.extend(
+        "reverse".into(),
+        builtin1(|v| match v {
+            Value::Series(mut vs) => {
+                vs.reverse();
+                Ok(Value::Series(vs))
+            }
+            other => Err(RuntimeError::new(format!(
+                "reverse expects a series, got {}",
+                show(&other)
+            ))),
+        }),
+    );
+    env = env.extend(
+        "append".into(),
+        builtin1(|a| {
+            Ok(builtin1(move |b| match (&a, &b) {
+                (Value::Series(av), Value::Series(bv)) => {
+                    let mut out = av.clone();
+                    out.extend(bv.iter().cloned());
+                    Ok(Value::Series(out))
+                }
+                _ => Err(RuntimeError::new(format!(
+                    "append expects two series, got {} and {}",
+                    show(&a),
+                    show(&b),
+                ))),
+            }))
+        }),
+    );
+    env = env.extend(
+        "zip".into(),
+        builtin1(|a| {
+            Ok(builtin1(move |b| match (&a, &b) {
+                (Value::Series(av), Value::Series(bv)) => {
+                    let pairs: Vec<Value> = av
+                        .iter()
+                        .zip(bv.iter())
+                        .map(|(x, y)| Value::Tuple(vec![x.clone(), y.clone()]))
+                        .collect();
+                    Ok(Value::Series(pairs))
+                }
+                _ => Err(RuntimeError::new(format!(
+                    "zip expects two series, got {} and {}",
+                    show(&a),
+                    show(&b),
+                ))),
+            }))
+        }),
+    );
+    env = env.extend(
+        "enumerate".into(),
+        builtin1(|v| match v {
+            Value::Series(vs) => {
+                let pairs: Vec<Value> = vs
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, x)| Value::Tuple(vec![Value::Int(i as i64), x]))
+                    .collect();
+                Ok(Value::Series(pairs))
+            }
+            other => Err(RuntimeError::new(format!(
+                "enumerate expects a series, got {}",
+                show(&other)
+            ))),
+        }),
+    );
+    env = env.extend(
+        "range".into(),
+        builtin1(|lo| {
+            let Value::Int(l) = lo else {
+                return Err(RuntimeError::new(format!(
+                    "range expects Int, got {}",
+                    show(&lo)
+                )));
+            };
+            Ok(builtin1(move |hi| {
+                let Value::Int(h) = hi else {
+                    return Err(RuntimeError::new(format!(
+                        "range expects Int, got {}",
+                        show(&hi)
+                    )));
+                };
+                Ok(Value::Series((l..h).map(Value::Int).collect()))
+            }))
+        }),
+    );
     env = env.extend("sum".into(), builtin1(|xs| sum_series(xs)));
     env = env.extend("mean".into(), builtin1(|xs| mean_series(xs)));
     env = env.extend("min".into(), builtin1(|xs| extremum_series(xs, true)));
