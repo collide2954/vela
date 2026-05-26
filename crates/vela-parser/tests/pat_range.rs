@@ -22,12 +22,17 @@ fn inclusive_range_pattern() {
 
 #[test]
 fn multiple_range_arms() {
-    let e = parse_expr("match age with | 0..=12 -> 1 | 13..=19 -> 2 | _ -> 3")
-        .expect("parses");
+    let e = parse_expr("match age with | 0..=12 -> 1 | 13..=19 -> 2 | _ -> 3").expect("parses");
     if let Expr::Match(_, arms) = e {
         assert_eq!(arms.len(), 3);
-        assert_eq!(arms[0].pat, Pat::Range(Box::new(lit_pat(0)), Box::new(lit_pat(12))));
-        assert_eq!(arms[1].pat, Pat::Range(Box::new(lit_pat(13)), Box::new(lit_pat(19))));
+        assert_eq!(
+            arms[0].pat,
+            Pat::Range(Box::new(lit_pat(0)), Box::new(lit_pat(12)))
+        );
+        assert_eq!(
+            arms[1].pat,
+            Pat::Range(Box::new(lit_pat(13)), Box::new(lit_pat(19)))
+        );
         assert_eq!(arms[2].pat, Pat::Wildcard);
     } else {
         panic!("expected match");

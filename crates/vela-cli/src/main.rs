@@ -89,7 +89,9 @@ fn test_one(path: &str, source: &str) -> ExitCode {
     match vela_parser::parse_program(source) {
         Ok(_) => {}
         Err(e) => {
-            let mut diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+            let mut diag = Diagnostic::error(e.message)
+                .with_path(path)
+                .with_code(e.code);
             if let Some(span) = e.span {
                 diag = diag.with_span(span);
             }
@@ -100,12 +102,16 @@ fn test_one(path: &str, source: &str) -> ExitCode {
     match vela_check::check_program_with_warnings(source) {
         Ok((_, warnings)) => {
             for w in &warnings {
-                let diag = Diagnostic::warning(&w.message).with_path(path).with_code(w.code);
+                let diag = Diagnostic::warning(&w.message)
+                    .with_path(path)
+                    .with_code(w.code);
                 eprint!("{}", diag.render(source));
             }
         }
         Err(e) => {
-            let diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+            let diag = Diagnostic::error(e.message)
+                .with_path(path)
+                .with_code(e.code);
             eprint!("{}", diag.render(source));
             return ExitCode::from(1);
         }
@@ -143,7 +149,9 @@ fn run_one(path: &str, source: &str) -> ExitCode {
     match vela_parser::parse_program(source) {
         Ok(_) => {}
         Err(e) => {
-            let mut diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+            let mut diag = Diagnostic::error(e.message)
+                .with_path(path)
+                .with_code(e.code);
             if let Some(span) = e.span {
                 diag = diag.with_span(span);
             }
@@ -154,12 +162,16 @@ fn run_one(path: &str, source: &str) -> ExitCode {
     match vela_check::check_program_with_warnings(source) {
         Ok((_, warnings)) => {
             for w in &warnings {
-                let diag = Diagnostic::warning(&w.message).with_path(path).with_code(w.code);
+                let diag = Diagnostic::warning(&w.message)
+                    .with_path(path)
+                    .with_code(w.code);
                 eprint!("{}", diag.render(source));
             }
         }
         Err(e) => {
-            let diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+            let diag = Diagnostic::error(e.message)
+                .with_path(path)
+                .with_code(e.code);
             eprint!("{}", diag.render(source));
             return ExitCode::from(1);
         }
@@ -193,14 +205,18 @@ fn check_one(path: &str, source: &str) -> ExitCode {
     match vela_check::check_program_with_warnings(source) {
         Ok((_, warnings)) => {
             for w in &warnings {
-                let diag = Diagnostic::warning(&w.message).with_path(path).with_code(w.code);
+                let diag = Diagnostic::warning(&w.message)
+                    .with_path(path)
+                    .with_code(w.code);
                 eprint!("{}", diag.render(source));
             }
             println!("ok");
             ExitCode::SUCCESS
         }
         Err(e) => {
-            let diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+            let diag = Diagnostic::error(e.message)
+                .with_path(path)
+                .with_code(e.code);
             eprint!("{}", diag.render(source));
             ExitCode::from(1)
         }

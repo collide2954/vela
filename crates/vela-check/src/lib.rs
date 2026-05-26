@@ -51,8 +51,10 @@ impl Type {
                 format!("({})", parts.join(", "))
             }
             Type::Record(fields, tail) => {
-                let parts: Vec<String> =
-                    fields.iter().map(|(n, t)| format!("{n}: {}", t.show())).collect();
+                let parts: Vec<String> = fields
+                    .iter()
+                    .map(|(n, t)| format!("{n}: {}", t.show()))
+                    .collect();
                 match tail {
                     None => format!("{{ {} }}", parts.join(", ")),
                     Some(t) => format!("{{ {} | {} }}", parts.join(", "), t.show()),
@@ -61,8 +63,10 @@ impl Type {
             Type::DataFrame(schema) => match schema {
                 None => "DataFrame".into(),
                 Some(fields) => {
-                    let parts: Vec<String> =
-                        fields.iter().map(|(n, t)| format!("{n}: {}", t.show())).collect();
+                    let parts: Vec<String> = fields
+                        .iter()
+                        .map(|(n, t)| format!("{n}: {}", t.show()))
+                        .collect();
                     format!("DataFrame[{{ {} }}]", parts.join(", "))
                 }
             },
@@ -96,7 +100,10 @@ pub struct TypeError {
 
 impl TypeError {
     fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into(), code: "E0100" }
+        Self {
+            message: message.into(),
+            code: "E0100",
+        }
     }
 
     fn with_code(mut self, code: &'static str) -> Self {
@@ -113,7 +120,10 @@ pub struct Scheme {
 
 impl Scheme {
     fn mono(ty: Type) -> Self {
-        Self { vars: Vec::new(), ty }
+        Self {
+            vars: Vec::new(),
+            ty,
+        }
     }
 }
 
@@ -203,14 +213,14 @@ impl Ctx {
                 Some(t2) => self.resolve(t2),
                 None => Type::Var(*n),
             },
-            Type::Fn(a, b) => {
-                Type::Fn(Box::new(self.resolve(a)), Box::new(self.resolve(b)))
-            }
+            Type::Fn(a, b) => Type::Fn(Box::new(self.resolve(a)), Box::new(self.resolve(b))),
             Type::Series(t) => Type::Series(Box::new(self.resolve(t))),
             Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| self.resolve(t)).collect()),
             Type::Record(fields, tail) => {
-                let resolved_fields: Vec<(String, Type)> =
-                    fields.iter().map(|(n, t)| (n.clone(), self.resolve(t))).collect();
+                let resolved_fields: Vec<(String, Type)> = fields
+                    .iter()
+                    .map(|(n, t)| (n.clone(), self.resolve(t)))
+                    .collect();
                 match tail {
                     None => Type::Record(resolved_fields, None),
                     Some(t) => {
@@ -234,10 +244,9 @@ impl Ctx {
             Type::Result(a, e) => {
                 Type::Result(Box::new(self.resolve(a)), Box::new(self.resolve(e)))
             }
-            Type::Named(name, args) => Type::Named(
-                name.clone(),
-                args.iter().map(|t| self.resolve(t)).collect(),
-            ),
+            Type::Named(name, args) => {
+                Type::Named(name.clone(), args.iter().map(|t| self.resolve(t)).collect())
+            }
             other => other.clone(),
         }
     }
@@ -450,7 +459,8 @@ impl Ctx {
 }
 
 pub fn check_expr(src: &str) -> Result<Type, TypeError> {
-    let expr = parse_expr(src).map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
+    let expr =
+        parse_expr(src).map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
     let mut ctx = Ctx::default();
     let env = prelude(&mut ctx);
     let t = infer(&expr, &env, &mut ctx)?;
@@ -462,8 +472,8 @@ pub fn check_program(src: &str) -> Result<Type, TypeError> {
 }
 
 pub fn check_program_with_warnings(src: &str) -> Result<(Type, Vec<Warning>), TypeError> {
-    let program = parse_program(src)
-        .map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
+    let program =
+        parse_program(src).map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
     let mut ctx = Ctx::default();
     let mut env = prelude(&mut ctx);
     let mut last = Type::Unit;
@@ -523,7 +533,10 @@ fn prelude(ctx: &mut Ctx) -> Env {
     // sum : [Int] -> Int
     env = env.extend(
         "sum".into(),
-        Scheme { vars: Vec::new(), ty: fn_of(series_of(Type::Int), Type::Int) },
+        Scheme {
+            vars: Vec::new(),
+            ty: fn_of(series_of(Type::Int), Type::Int),
+        },
     );
     // fold : (b -> a -> b) -> b -> [a] -> b
     {
@@ -547,7 +560,10 @@ fn prelude(ctx: &mut Ctx) -> Env {
             "head".into(),
             Scheme {
                 vars: vec![a],
-                ty: fn_of(series_of(Type::Var(a)), Type::Option(Box::new(Type::Var(a)))),
+                ty: fn_of(
+                    series_of(Type::Var(a)),
+                    Type::Option(Box::new(Type::Var(a))),
+                ),
             },
         );
     }
@@ -569,7 +585,10 @@ fn prelude(ctx: &mut Ctx) -> Env {
             "take".into(),
             Scheme {
                 vars: vec![a],
-                ty: fn_of(Type::Int, fn_of(series_of(Type::Var(a)), series_of(Type::Var(a)))),
+                ty: fn_of(
+                    Type::Int,
+                    fn_of(series_of(Type::Var(a)), series_of(Type::Var(a))),
+                ),
             },
         );
     }
@@ -580,7 +599,10 @@ fn prelude(ctx: &mut Ctx) -> Env {
             "drop".into(),
             Scheme {
                 vars: vec![a],
-                ty: fn_of(Type::Int, fn_of(series_of(Type::Var(a)), series_of(Type::Var(a)))),
+                ty: fn_of(
+                    Type::Int,
+                    fn_of(series_of(Type::Var(a)), series_of(Type::Var(a))),
+                ),
             },
         );
     }
@@ -649,12 +671,24 @@ fn prelude(ctx: &mut Ctx) -> Env {
             ty: fn_of(Type::Int, fn_of(Type::Int, series_of(Type::Int))),
         },
     );
+    // format : String -> [String] -> String
+    // (positional only: each `{}` is replaced left-to-right by elements)
+    env = env.extend(
+        "format".into(),
+        Scheme {
+            vars: Vec::new(),
+            ty: fn_of(Type::String, fn_of(series_of(Type::String), Type::String)),
+        },
+    );
     // println : a -> ()
     {
         let a = ctx.fresh_id();
         env = env.extend(
             "println".into(),
-            Scheme { vars: vec![a], ty: fn_of(Type::Var(a), Type::Unit) },
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(Type::Var(a), Type::Unit),
+            },
         );
     }
     // print : a -> ()
@@ -662,7 +696,10 @@ fn prelude(ctx: &mut Ctx) -> Env {
         let a = ctx.fresh_id();
         env = env.extend(
             "print".into(),
-            Scheme { vars: vec![a], ty: fn_of(Type::Var(a), Type::Unit) },
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(Type::Var(a), Type::Unit),
+            },
         );
     }
     // read_file : String -> Result<String, IoError>
@@ -719,10 +756,13 @@ fn prelude(ctx: &mut Ctx) -> Env {
             Scheme {
                 vars: vec![a, e],
                 ty: Type::Record(
-                    vec![("unwrap".into(), fn_of(
-                        Type::Result(Box::new(Type::Var(a)), Box::new(Type::Var(e))),
-                        Type::Var(a),
-                    ))],
+                    vec![(
+                        "unwrap".into(),
+                        fn_of(
+                            Type::Result(Box::new(Type::Var(a)), Box::new(Type::Var(e))),
+                            Type::Var(a),
+                        ),
+                    )],
                     None,
                 ),
             },
@@ -737,10 +777,10 @@ fn prelude(ctx: &mut Ctx) -> Env {
             Scheme {
                 vars: vec![a],
                 ty: Type::Record(
-                    vec![("unwrap".into(), fn_of(
-                        Type::Option(Box::new(Type::Var(a))),
-                        Type::Var(a),
-                    ))],
+                    vec![(
+                        "unwrap".into(),
+                        fn_of(Type::Option(Box::new(Type::Var(a))), Type::Var(a)),
+                    )],
                     None,
                 ),
             },
@@ -774,16 +814,19 @@ fn prelude(ctx: &mut Ctx) -> Env {
             Scheme {
                 vars: vec![s, a],
                 ty: Type::Record(
-                    vec![("unfold".into(), fn_of(
+                    vec![(
+                        "unfold".into(),
                         fn_of(
-                            Type::Var(s),
-                            Type::Option(Box::new(Type::Tuple(vec![
-                                Type::Var(a),
+                            fn_of(
                                 Type::Var(s),
-                            ]))),
+                                Type::Option(Box::new(Type::Tuple(vec![
+                                    Type::Var(a),
+                                    Type::Var(s),
+                                ]))),
+                            ),
+                            fn_of(Type::Var(s), series_of(Type::Var(a))),
                         ),
-                        fn_of(Type::Var(s), series_of(Type::Var(a))),
-                    ))],
+                    )],
                     None,
                 ),
             },
@@ -824,7 +867,10 @@ fn prelude(ctx: &mut Ctx) -> Env {
         let a = ctx.fresh_id();
         env = env.extend(
             "None".into(),
-            Scheme { vars: vec![a], ty: Type::Option(Box::new(Type::Var(a))) },
+            Scheme {
+                vars: vec![a],
+                ty: Type::Option(Box::new(Type::Var(a))),
+            },
         );
     }
     {
@@ -904,13 +950,18 @@ fn check_nominal_match(
 
 fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
     match stmt {
-        Stmt::Let { name, params, return_ty, body, recursive } => {
+        Stmt::Let {
+            name,
+            params,
+            return_ty,
+            body,
+            recursive,
+        } => {
             let mut translator = TyTranslator::new();
             let mut inner_env = env.clone();
             if *recursive {
                 let placeholder = ctx.fresh_var();
-                inner_env =
-                    inner_env.extend(name.clone(), Scheme::mono(placeholder));
+                inner_env = inner_env.extend(name.clone(), Scheme::mono(placeholder));
             }
             let mut param_types = Vec::with_capacity(params.len());
             for p in params {
@@ -945,8 +996,7 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                 let rt_translated = translator.translate(rt, ctx)?;
                 if let Type::Named(nom_name, nom_args) = &rt_translated
                     && nom_args.is_empty()
-                    && let Some(expected_fields) =
-                        ctx.nominal_records.get(nom_name).cloned()
+                    && let Some(expected_fields) = ctx.nominal_records.get(nom_name).cloned()
                 {
                     let resolved = ctx.resolve(&body_ty);
                     if let Type::Record(actual, None) = &resolved {
@@ -961,9 +1011,10 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                     body_ty = rt_translated;
                 }
             }
-            let ty = param_types.into_iter().rev().fold(body_ty, |acc, pt| {
-                Type::Fn(Box::new(pt), Box::new(acc))
-            });
+            let ty = param_types
+                .into_iter()
+                .rev()
+                .fold(body_ty, |acc, pt| Type::Fn(Box::new(pt), Box::new(acc)));
             let scheme = ctx.generalize(env, &ty);
             ctx.warn_shadowing(env, name);
             *env = env.extend(name.clone(), scheme);
@@ -1013,9 +1064,10 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                     let rt_translated = translator.translate(rt, ctx)?;
                     ctx.unify(&body_ty, &rt_translated)?;
                 }
-                let ty = param_types.into_iter().rev().fold(body_ty, |acc, pt| {
-                    Type::Fn(Box::new(pt), Box::new(acc))
-                });
+                let ty = param_types
+                    .into_iter()
+                    .rev()
+                    .fold(body_ty, |acc, pt| Type::Fn(Box::new(pt), Box::new(acc)));
                 ctx.unify(placeholder, &ty)?;
                 binding_types.push(ty);
             }
@@ -1044,7 +1096,9 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             for param_name in &decl.params {
                 let v = ctx.fresh_var();
                 if let Type::Var(n) = v {
-                    translator.named_vars.insert(param_name.clone(), Type::Var(n));
+                    translator
+                        .named_vars
+                        .insert(param_name.clone(), Type::Var(n));
                     param_vars.push(n);
                 }
             }
@@ -1065,7 +1119,10 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                             let arg_ty = translator.translate(arg, ctx)?;
                             ty = Type::Fn(Box::new(arg_ty), Box::new(ty));
                         }
-                        let scheme = Scheme { vars: param_vars.clone(), ty };
+                        let scheme = Scheme {
+                            vars: param_vars.clone(),
+                            ty,
+                        };
                         *env = env.extend(v.name.clone(), scheme);
                     }
                     ctx.sums.insert(decl.name.clone(), variant_names);
@@ -1092,7 +1149,11 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             ctx.unify(&var_ty, &body_ty)?;
             Ok(Type::Unit)
         }
-        Stmt::For { binding, iter, body } => {
+        Stmt::For {
+            binding,
+            iter,
+            body,
+        } => {
             let iter_ty = infer(iter, env, ctx)?;
             let elem_ty = ctx.fresh_var();
             ctx.unify(&iter_ty, &Type::Series(Box::new(elem_ty.clone())))?;
@@ -1137,7 +1198,10 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                     };
                     ty = Type::Fn(Box::new(pt), Box::new(ty));
                 }
-                let scheme = Scheme { vars: vec![tv_id], ty };
+                let scheme = Scheme {
+                    vars: vec![tv_id],
+                    ty,
+                };
                 *env = env.extend(method.name.clone(), scheme);
             }
             Ok(Type::Unit)
@@ -1172,9 +1236,7 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             }
             Ok(Type::Unit)
         }
-        Stmt::Tests(_)
-        | Stmt::Extern { .. }
-        | Stmt::Import { .. } => Ok(Type::Unit),
+        Stmt::Tests(_) | Stmt::Extern { .. } | Stmt::Import { .. } => Ok(Type::Unit),
         Stmt::Input { name, body } | Stmt::Output { name, body } => {
             let ty = infer(body, env, ctx)?;
             let ty = ctx.resolve(&ty);
@@ -1239,13 +1301,10 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             let expected = Type::Result(Box::new(a.clone()), Box::new(e.clone()));
             ctx.unify(&t, &expected)?;
             let return_ty = ctx.expected_return.clone().ok_or_else(|| {
-                TypeError::new(
-                    "`?` requires the enclosing function to return a Result",
-                )
+                TypeError::new("`?` requires the enclosing function to return a Result")
             })?;
             let outer_ok = ctx.fresh_var();
-            let expected_return =
-                Type::Result(Box::new(outer_ok), Box::new(e.clone()));
+            let expected_return = Type::Result(Box::new(outer_ok), Box::new(e.clone()));
             ctx.unify(&return_ty, &expected_return)?;
             Ok(ctx.resolve(&a))
         }
@@ -1292,7 +1351,9 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             for e in elems {
                 ts.push(infer(e, env, ctx)?);
             }
-            Ok(Type::Tuple(ts.into_iter().map(|t| ctx.resolve(&t)).collect()))
+            Ok(Type::Tuple(
+                ts.into_iter().map(|t| ctx.resolve(&t)).collect(),
+            ))
         }
         Expr::Record(fields) => {
             let mut fts = Vec::with_capacity(fields.len());
@@ -1315,9 +1376,7 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
                 let t = infer(e, env, ctx)?;
                 let t = ctx.resolve(&t);
                 let Some((_, existing)) = fields.iter_mut().find(|(name, _)| name == n) else {
-                    return Err(TypeError::new(format!(
-                        "record has no field `{n}`"
-                    )));
+                    return Err(TypeError::new(format!("record has no field `{n}`")));
                 };
                 ctx.unify(existing, &t)?;
                 *existing = ctx.resolve(&t);
@@ -1331,9 +1390,7 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
                 match schema {
                     Some(fields) => {
                         if let Some((_, ft)) = fields.iter().find(|(n, _)| n == name) {
-                            return Ok(Type::Series(Box::new(Type::Option(Box::new(
-                                ft.clone(),
-                            )))));
+                            return Ok(Type::Series(Box::new(Type::Option(Box::new(ft.clone())))));
                         } else {
                             return Err(TypeError::new(format!(
                                 "DataFrame schema has no column `{name}`"
@@ -1421,14 +1478,12 @@ struct TyTranslator {
 
 impl TyTranslator {
     fn new() -> Self {
-        Self { named_vars: HashMap::new() }
+        Self {
+            named_vars: HashMap::new(),
+        }
     }
 
-    fn translate(
-        &mut self,
-        ty: &vela_parser::Ty,
-        ctx: &mut Ctx,
-    ) -> Result<Type, TypeError> {
+    fn translate(&mut self, ty: &vela_parser::Ty, ctx: &mut Ctx) -> Result<Type, TypeError> {
         match ty {
             vela_parser::Ty::Unit => Ok(Type::Unit),
             vela_parser::Ty::Con(name) => self.translate_con(name, &[], ctx),
@@ -1441,9 +1496,7 @@ impl TyTranslator {
                     Ok(v)
                 }
             }
-            vela_parser::Ty::Series(t) => {
-                Ok(Type::Series(Box::new(self.translate(t, ctx)?)))
-            }
+            vela_parser::Ty::Series(t) => Ok(Type::Series(Box::new(self.translate(t, ctx)?))),
             vela_parser::Ty::Tuple(ts) => {
                 let mut translated = Vec::with_capacity(ts.len());
                 for t in ts {
@@ -1508,7 +1561,9 @@ impl TyTranslator {
                     ))
                 }
             }
-            "Option" if targs.len() == 1 => Ok(Type::Option(Box::new(targs.into_iter().next().expect("len 1")))),
+            "Option" if targs.len() == 1 => Ok(Type::Option(Box::new(
+                targs.into_iter().next().expect("len 1"),
+            ))),
             "Result" if targs.len() == 2 => {
                 let mut it = targs.into_iter();
                 let a = it.next().expect("a");
@@ -1526,19 +1581,23 @@ impl TyTranslator {
 fn apply_subst(ty: &Type, subst: &HashMap<u32, Type>) -> Type {
     match ty {
         Type::Var(n) => subst.get(n).cloned().unwrap_or(Type::Var(*n)),
-        Type::Fn(a, b) => {
-            Type::Fn(Box::new(apply_subst(a, subst)), Box::new(apply_subst(b, subst)))
-        }
+        Type::Fn(a, b) => Type::Fn(
+            Box::new(apply_subst(a, subst)),
+            Box::new(apply_subst(b, subst)),
+        ),
         Type::Series(t) => Type::Series(Box::new(apply_subst(t, subst))),
         Type::Tuple(ts) => Type::Tuple(ts.iter().map(|t| apply_subst(t, subst)).collect()),
         Type::Record(fs, tail) => Type::Record(
-            fs.iter().map(|(n, t)| (n.clone(), apply_subst(t, subst))).collect(),
+            fs.iter()
+                .map(|(n, t)| (n.clone(), apply_subst(t, subst)))
+                .collect(),
             tail.as_ref().map(|t| Box::new(apply_subst(t, subst))),
         ),
         Type::Option(t) => Type::Option(Box::new(apply_subst(t, subst))),
-        Type::Result(a, e) => {
-            Type::Result(Box::new(apply_subst(a, subst)), Box::new(apply_subst(e, subst)))
-        }
+        Type::Result(a, e) => Type::Result(
+            Box::new(apply_subst(a, subst)),
+            Box::new(apply_subst(e, subst)),
+        ),
         Type::Named(name, args) => Type::Named(
             name.clone(),
             args.iter().map(|t| apply_subst(t, subst)).collect(),
@@ -1628,7 +1687,9 @@ fn missing_witness(scrut_ty: &Type, patterns: &[&Pat], ctx: &Ctx) -> Option<Pat>
             }
         }
         Type::Option(inner) => {
-            let has_none = expanded_refs.iter().any(|p| matches!(p, Pat::Cons(n, a) if n == "None" && a.is_empty()));
+            let has_none = expanded_refs
+                .iter()
+                .any(|p| matches!(p, Pat::Cons(n, a) if n == "None" && a.is_empty()));
             if !has_none {
                 return Some(Pat::Cons("None".into(), vec![]));
             }
@@ -1771,8 +1832,10 @@ fn show_pat(p: &Pat) -> String {
             format!("({})", parts.join(", "))
         }
         Pat::Record(fs) => {
-            let parts: Vec<String> =
-                fs.iter().map(|(n, p)| format!("{n} = {}", show_pat(p))).collect();
+            let parts: Vec<String> = fs
+                .iter()
+                .map(|(n, p)| format!("{n} = {}", show_pat(p)))
+                .collect();
             format!("{{ {} }}", parts.join(", "))
         }
         Pat::Or(alts) => {
@@ -1784,7 +1847,6 @@ fn show_pat(p: &Pat) -> String {
         Pat::List(_) => "[..]".into(),
     }
 }
-
 
 fn infer_pat(
     pat: &Pat,
@@ -1867,10 +1929,7 @@ fn infer_pat(
                         bindings.append(&mut bs);
                     }
                     ListPart::Rest(Some(name)) => {
-                        bindings.push((
-                            name.clone(),
-                            Type::Series(Box::new(elem_ty.clone())),
-                        ));
+                        bindings.push((name.clone(), Type::Series(Box::new(elem_ty.clone()))));
                     }
                     ListPart::Rest(None) => {}
                 }
@@ -1949,9 +2008,7 @@ fn infer_binary(
             let resolved = ctx.resolve(&l);
             match resolved {
                 Type::String | Type::Series(_) => Ok(resolved),
-                Type::Var(_) => Err(TypeError::new(
-                    "`++` operands are ambiguous; annotate them",
-                )),
+                Type::Var(_) => Err(TypeError::new("`++` operands are ambiguous; annotate them")),
                 other => Err(TypeError::new(format!(
                     "`++` requires String or Series, got {}",
                     other.show()

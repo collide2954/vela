@@ -16,10 +16,7 @@ fn map_increments_series() {
 #[test]
 fn filter_keeps_predicate_true() {
     let src = "filter (fn x -> x > 2) [1, 2, 3, 4]";
-    assert_eq!(
-        r(src),
-        Value::Series(vec![Value::Int(3), Value::Int(4)]),
-    );
+    assert_eq!(r(src), Value::Series(vec![Value::Int(3), Value::Int(4)]),);
 }
 
 #[test]
@@ -79,6 +76,10 @@ fn standardize_with_map_mean() {
     let src = "let xs = [1.0, 2.0, 3.0]\nlet m = mean xs\nmap (fn x -> x - m) xs";
     assert_eq!(
         r(src),
-        Value::Series(vec![Value::Float(-1.0), Value::Float(0.0), Value::Float(1.0)]),
+        Value::Series(vec![
+            Value::Float(-1.0),
+            Value::Float(0.0),
+            Value::Float(1.0)
+        ]),
     );
 }

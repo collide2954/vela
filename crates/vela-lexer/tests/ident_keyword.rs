@@ -15,7 +15,10 @@ fn simple_ident() {
 
 #[test]
 fn ident_with_underscore_and_digits() {
-    assert_eq!(kinds("snake_case_42"), vec![TokenKind::Ident("snake_case_42".into())]);
+    assert_eq!(
+        kinds("snake_case_42"),
+        vec![TokenKind::Ident("snake_case_42".into())]
+    );
 }
 
 #[test]
@@ -30,7 +33,10 @@ fn wildcard_ident_underscore_alone() {
 
 #[test]
 fn type_name_camel_case() {
-    assert_eq!(kinds("DataFrame"), vec![TokenKind::Ident("DataFrame".into())]);
+    assert_eq!(
+        kinds("DataFrame"),
+        vec![TokenKind::Ident("DataFrame".into())]
+    );
 }
 
 #[test]

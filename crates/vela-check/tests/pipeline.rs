@@ -23,7 +23,9 @@ fn pipe_chains() {
 
 #[test]
 fn pipe_with_type_mismatch_fails() {
-    let e = check_expr("\"abc\" |> (fn x -> x + 1)").unwrap_err().message;
+    let e = check_expr("\"abc\" |> (fn x -> x + 1)")
+        .unwrap_err()
+        .message;
     assert!(e.contains("Int") && e.contains("String"));
 }
 

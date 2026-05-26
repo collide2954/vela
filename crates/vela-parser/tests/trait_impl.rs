@@ -1,4 +1,6 @@
-use vela_parser::{Expr, ImplBlock, ImplMethod, Param, Stmt, TraitDecl, TraitMethodSig, Ty, parse_stmt};
+use vela_parser::{
+    Expr, ImplBlock, ImplMethod, Param, Stmt, TraitDecl, TraitMethodSig, Ty, parse_stmt,
+};
 
 fn s(src: &str) -> Stmt {
     parse_stmt(src).expect("parses")
@@ -18,7 +20,10 @@ fn simple_trait_one_method() {
             type_var: "t".into(),
             methods: vec![TraitMethodSig {
                 name: "show".into(),
-                params: vec![Param { pat: vela_parser::Pat::Var("x".into()), ty: Some(con("t")) }],
+                params: vec![Param {
+                    pat: vela_parser::Pat::Var("x".into()),
+                    ty: Some(con("t"))
+                }],
                 return_ty: con("String"),
             }],
         }),
@@ -27,9 +32,8 @@ fn simple_trait_one_method() {
 
 #[test]
 fn trait_with_two_methods() {
-    let stmt = s(
-        "trait Eq t =\n    fn eq (a : t) (b : t) : Bool\n    fn neq (a : t) (b : t) : Bool",
-    );
+    let stmt =
+        s("trait Eq t =\n    fn eq (a : t) (b : t) : Bool\n    fn neq (a : t) (b : t) : Bool");
     if let Stmt::TraitDecl(decl) = stmt {
         assert_eq!(decl.name, "Eq");
         assert_eq!(decl.methods.len(), 2);
@@ -50,7 +54,10 @@ fn simple_impl_block() {
             ty: con("Float"),
             methods: vec![ImplMethod {
                 name: "show".into(),
-                params: vec![Param { pat: vela_parser::Pat::Var("x".into()), ty: None }],
+                params: vec![Param {
+                    pat: vela_parser::Pat::Var("x".into()),
+                    ty: None
+                }],
                 return_ty: None,
                 body: Expr::Var("x".into()),
             }],
@@ -77,10 +84,7 @@ fn impl_for_parametric_type() {
     let stmt = s("impl Show (Option a) =\n    fn show x = x");
     if let Stmt::Impl(block) = stmt {
         assert_eq!(block.trait_name, "Show");
-        assert_eq!(
-            block.ty,
-            Ty::App(Box::new(con("Option")), vec![con("a")]),
-        );
+        assert_eq!(block.ty, Ty::App(Box::new(con("Option")), vec![con("a")]),);
     } else {
         panic!("expected impl");
     }

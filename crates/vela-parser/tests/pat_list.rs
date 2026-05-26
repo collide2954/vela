@@ -1,4 +1,4 @@
-use vela_parser::{Expr, Lit, ListPart, Pat, parse_expr};
+use vela_parser::{Expr, ListPart, Lit, Pat, parse_expr};
 
 fn p(src: &str) -> Expr {
     parse_expr(src).expect("parses")
@@ -14,10 +14,7 @@ fn arm_pat(src: &str) -> Pat {
 
 #[test]
 fn empty_list_pattern() {
-    assert_eq!(
-        arm_pat("match xs with | [] -> 0"),
-        Pat::List(vec![]),
-    );
+    assert_eq!(arm_pat("match xs with | [] -> 0"), Pat::List(vec![]),);
 }
 
 #[test]

@@ -20,7 +20,10 @@ fn simple_string() {
 
 #[test]
 fn string_with_newline_escape() {
-    assert_eq!(kinds(r#""line\nbreak""#), vec![TokenKind::Str("line\nbreak".into())]);
+    assert_eq!(
+        kinds(r#""line\nbreak""#),
+        vec![TokenKind::Str("line\nbreak".into())]
+    );
 }
 
 #[test]

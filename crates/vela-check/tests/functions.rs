@@ -32,10 +32,7 @@ fn two_param_curried_lambda() {
 
 #[test]
 fn applying_identity_to_int_yields_int() {
-    assert_eq!(
-        check_expr("(fn x -> x) 5").expect("type-checks"),
-        Type::Int,
-    );
+    assert_eq!(check_expr("(fn x -> x) 5").expect("type-checks"), Type::Int,);
 }
 
 #[test]

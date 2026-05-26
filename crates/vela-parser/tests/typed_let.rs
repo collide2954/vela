@@ -31,7 +31,10 @@ fn let_function_with_typed_parameter() {
         s("let id (x : Int) = x"),
         Stmt::Let {
             name: "id".into(),
-            params: vec![Param { pat: vela_parser::Pat::Var("x".into()), ty: Some(con("Int")) }],
+            params: vec![Param {
+                pat: vela_parser::Pat::Var("x".into()),
+                ty: Some(con("Int"))
+            }],
             return_ty: None,
             body: Expr::Var("x".into()),
             recursive: false,
@@ -42,7 +45,10 @@ fn let_function_with_typed_parameter() {
 #[test]
 fn let_function_with_typed_param_and_return_type() {
     let stmt = s("let standardize (xs : [Float]) : [Float] = xs");
-    if let Stmt::Let { params, return_ty, .. } = stmt {
+    if let Stmt::Let {
+        params, return_ty, ..
+    } = stmt
+    {
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].simple_name().unwrap(), "xs");
         assert_eq!(params[0].ty, Some(Ty::Series(Box::new(con("Float")))));

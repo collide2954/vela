@@ -2,12 +2,18 @@ use vela_check::{Type, check_expr};
 
 #[test]
 fn float_of_int() {
-    assert_eq!(check_expr("Float.of_int 1").expect("type-checks"), Type::Float);
+    assert_eq!(
+        check_expr("Float.of_int 1").expect("type-checks"),
+        Type::Float
+    );
 }
 
 #[test]
 fn int_of_float() {
-    assert_eq!(check_expr("Int.of_float 1.5").expect("type-checks"), Type::Int);
+    assert_eq!(
+        check_expr("Int.of_float 1.5").expect("type-checks"),
+        Type::Int
+    );
 }
 
 #[test]

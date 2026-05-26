@@ -6,7 +6,10 @@ fn r(src: &str) -> Value {
 
 #[test]
 fn head_of_nonempty() {
-    assert_eq!(r("head [1, 2, 3]"), Value::Cons("Some".into(), vec![Value::Int(1)]));
+    assert_eq!(
+        r("head [1, 2, 3]"),
+        Value::Cons("Some".into(), vec![Value::Int(1)])
+    );
 }
 
 #[test]
@@ -50,7 +53,12 @@ fn reverse_series() {
 fn append_two_series() {
     assert_eq!(
         r("append [1, 2] [3, 4]"),
-        Value::Series(vec![Value::Int(1), Value::Int(2), Value::Int(3), Value::Int(4)]),
+        Value::Series(vec![
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(3),
+            Value::Int(4)
+        ]),
     );
 }
 
@@ -81,7 +89,12 @@ fn enumerate_indices_elements() {
 fn range_half_open() {
     assert_eq!(
         r("range 0 4"),
-        Value::Series(vec![Value::Int(0), Value::Int(1), Value::Int(2), Value::Int(3)]),
+        Value::Series(vec![
+            Value::Int(0),
+            Value::Int(1),
+            Value::Int(2),
+            Value::Int(3)
+        ]),
     );
 }
 

@@ -19,7 +19,11 @@ pub enum Value {
     Series(Vec<Value>),
     Record(Vec<(String, Value)>),
     Cons(String, Vec<Value>),
-    Closure { params: Vec<Pat>, body: Expr, env: Env },
+    Closure {
+        params: Vec<Pat>,
+        body: Expr,
+        env: Env,
+    },
     Builtin(BuiltinFn),
 }
 
@@ -96,17 +100,23 @@ pub struct RuntimeError {
 
 impl RuntimeError {
     fn new(msg: impl Into<String>) -> Self {
-        Self { message: msg.into(), short_circuit: None }
+        Self {
+            message: msg.into(),
+            short_circuit: None,
+        }
     }
 
     fn short_circuit(value: Value) -> Self {
-        Self { message: "short-circuit".into(), short_circuit: Some(value) }
+        Self {
+            message: "short-circuit".into(),
+            short_circuit: Some(value),
+        }
     }
 }
 
 pub fn run(src: &str) -> Result<Value, RuntimeError> {
-    let program = parse_program(src)
-        .map_err(|e| RuntimeError::new(format!("parse error: {}", e.message)))?;
+    let program =
+        parse_program(src).map_err(|e| RuntimeError::new(format!("parse error: {}", e.message)))?;
     let mut env = prelude();
     let mut last = Value::Unit;
     for stmt in &program.stmts {
@@ -123,24 +133,26 @@ pub struct TestReport {
 }
 
 pub fn run_tests(src: &str) -> Result<Vec<TestReport>, RuntimeError> {
-    let program = parse_program(src)
-        .map_err(|e| RuntimeError::new(format!("parse error: {}", e.message)))?;
+    let program =
+        parse_program(src).map_err(|e| RuntimeError::new(format!("parse error: {}", e.message)))?;
     let mut env = prelude();
     let mut reports = Vec::new();
     for stmt in &program.stmts {
         if let Stmt::Tests(cases) = stmt {
             for case in cases {
                 let report = match case {
-                    vela_parser::TestCase::Test { name, body } => {
-                        match eval(body, &env) {
-                            Ok(_) => TestReport { name: name.clone(), passed: true, message: None },
-                            Err(e) => TestReport {
-                                name: name.clone(),
-                                passed: false,
-                                message: Some(e.message),
-                            },
-                        }
-                    }
+                    vela_parser::TestCase::Test { name, body } => match eval(body, &env) {
+                        Ok(_) => TestReport {
+                            name: name.clone(),
+                            passed: true,
+                            message: None,
+                        },
+                        Err(e) => TestReport {
+                            name: name.clone(),
+                            passed: false,
+                            message: Some(e.message),
+                        },
+                    },
                     vela_parser::TestCase::Prop { name, .. } => TestReport {
                         name: name.clone(),
                         passed: true,
@@ -187,14 +199,17 @@ fn prelude() -> Env {
             ))),
         }))),
     );
-    env = env.extend("length".into(), builtin1(|v| match v {
-        Value::Series(vs) => Ok(Value::Int(vs.len() as i64)),
-        Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
-        other => Err(RuntimeError::new(format!(
-            "length expects a series or string, got {}",
-            show(&other)
-        ))),
-    }));
+    env = env.extend(
+        "length".into(),
+        builtin1(|v| match v {
+            Value::Series(vs) => Ok(Value::Int(vs.len() as i64)),
+            Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
+            other => Err(RuntimeError::new(format!(
+                "length expects a series or string, got {}",
+                show(&other)
+            ))),
+        }),
+    );
     env = env.extend(
         "map".into(),
         builtin1(|f| {
@@ -419,6 +434,51 @@ fn prelude() -> Env {
             }))
         }),
     );
+    env = env.extend(
+        "format".into(),
+        builtin1(|fmt| {
+            let Value::Str(template) = fmt else {
+                return Err(RuntimeError::new(format!(
+                    "format expects a String template, got {}",
+                    show(&fmt)
+                )));
+            };
+            Ok(builtin1(move |args| {
+                let Value::Series(vs) = args else {
+                    return Err(RuntimeError::new(format!(
+                        "format expects [String] arguments, got {}",
+                        show(&args)
+                    )));
+                };
+                let mut out = String::new();
+                let mut next = 0usize;
+                let chars: Vec<char> = template.chars().collect();
+                let mut i = 0;
+                while i < chars.len() {
+                    if i + 1 < chars.len() && chars[i] == '{' && chars[i + 1] == '}' {
+                        let arg = vs.get(next).ok_or_else(|| {
+                            RuntimeError::new(format!(
+                                "format: not enough arguments for template `{template}`"
+                            ))
+                        })?;
+                        let Value::Str(s) = arg else {
+                            return Err(RuntimeError::new(format!(
+                                "format expects [String], got element {}",
+                                show(arg)
+                            )));
+                        };
+                        out.push_str(s);
+                        next += 1;
+                        i += 2;
+                    } else {
+                        out.push(chars[i]);
+                        i += 1;
+                    }
+                }
+                Ok(Value::Str(out))
+            }))
+        }),
+    );
     env = env.extend("sum".into(), builtin1(|xs| sum_series(xs)));
     env = env.extend("mean".into(), builtin1(|xs| mean_series(xs)));
     env = env.extend("min".into(), builtin1(|xs| extremum_series(xs, true)));
@@ -427,102 +487,121 @@ fn prelude() -> Env {
     env = env.extend(
         "Float".into(),
         Value::Record(vec![
-            ("of_int".into(), builtin1(|v| match v {
-                Value::Int(n) => Ok(Value::Float(n as f64)),
-                other => Err(RuntimeError::new(format!(
-                    "Float.of_int expects Int, got {}",
-                    show(&other)
-                ))),
-            })),
-            ("to_string".into(), builtin1(|v| match v {
-                Value::Float(f) => Ok(Value::Str(format!("{f}"))),
-                other => Err(RuntimeError::new(format!(
-                    "Float.to_string expects Float, got {}",
-                    show(&other)
-                ))),
-            })),
+            (
+                "of_int".into(),
+                builtin1(|v| match v {
+                    Value::Int(n) => Ok(Value::Float(n as f64)),
+                    other => Err(RuntimeError::new(format!(
+                        "Float.of_int expects Int, got {}",
+                        show(&other)
+                    ))),
+                }),
+            ),
+            (
+                "to_string".into(),
+                builtin1(|v| match v {
+                    Value::Float(f) => Ok(Value::Str(format!("{f}"))),
+                    other => Err(RuntimeError::new(format!(
+                        "Float.to_string expects Float, got {}",
+                        show(&other)
+                    ))),
+                }),
+            ),
         ]),
     );
     env = env.extend(
         "Int".into(),
         Value::Record(vec![
-            ("of_float".into(), builtin1(|v| match v {
-                Value::Float(f) => Ok(Value::Int(f as i64)),
-                other => Err(RuntimeError::new(format!(
-                    "Int.of_float expects Float, got {}",
-                    show(&other)
-                ))),
-            })),
-            ("to_string".into(), builtin1(|v| match v {
-                Value::Int(n) => Ok(Value::Str(n.to_string())),
-                other => Err(RuntimeError::new(format!(
-                    "Int.to_string expects Int, got {}",
-                    show(&other)
-                ))),
-            })),
+            (
+                "of_float".into(),
+                builtin1(|v| match v {
+                    Value::Float(f) => Ok(Value::Int(f as i64)),
+                    other => Err(RuntimeError::new(format!(
+                        "Int.of_float expects Float, got {}",
+                        show(&other)
+                    ))),
+                }),
+            ),
+            (
+                "to_string".into(),
+                builtin1(|v| match v {
+                    Value::Int(n) => Ok(Value::Str(n.to_string())),
+                    other => Err(RuntimeError::new(format!(
+                        "Int.to_string expects Int, got {}",
+                        show(&other)
+                    ))),
+                }),
+            ),
         ]),
     );
     env = env.extend(
         "String".into(),
         Value::Record(vec![
-            ("length".into(), builtin1(|v| match v {
-                Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
-                other => Err(RuntimeError::new(format!(
-                    "String.length expects String, got {}",
-                    show(&other)
-                ))),
-            })),
-            ("concat".into(), builtin1(|v| match v {
-                Value::Series(vs) => {
-                    let mut out = String::new();
-                    for x in vs {
-                        match x {
-                            Value::Str(s) => out.push_str(&s),
-                            other => {
-                                return Err(RuntimeError::new(format!(
-                                    "String.concat expects [String], got element {}",
-                                    show(&other)
-                                )));
+            (
+                "length".into(),
+                builtin1(|v| match v {
+                    Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
+                    other => Err(RuntimeError::new(format!(
+                        "String.length expects String, got {}",
+                        show(&other)
+                    ))),
+                }),
+            ),
+            (
+                "concat".into(),
+                builtin1(|v| match v {
+                    Value::Series(vs) => {
+                        let mut out = String::new();
+                        for x in vs {
+                            match x {
+                                Value::Str(s) => out.push_str(&s),
+                                other => {
+                                    return Err(RuntimeError::new(format!(
+                                        "String.concat expects [String], got element {}",
+                                        show(&other)
+                                    )));
+                                }
                             }
                         }
+                        Ok(Value::Str(out))
                     }
-                    Ok(Value::Str(out))
-                }
-                other => Err(RuntimeError::new(format!(
-                    "String.concat expects [String], got {}",
-                    show(&other)
-                ))),
-            })),
+                    other => Err(RuntimeError::new(format!(
+                        "String.concat expects [String], got {}",
+                        show(&other)
+                    ))),
+                }),
+            ),
         ]),
     );
     env = env.extend(
         "Option".into(),
-        Value::Record(vec![("unwrap".into(), builtin1(|v| match v {
-            Value::Cons(n, args) if n == "Some" && args.len() == 1 => Ok(args[0].clone()),
-            Value::Cons(n, _) if n == "None" => {
-                Err(RuntimeError::new("Option.unwrap on None"))
-            }
-            other => Err(RuntimeError::new(format!(
-                "Option.unwrap expects Option, got {}",
-                show(&other)
-            ))),
-        }))]),
+        Value::Record(vec![(
+            "unwrap".into(),
+            builtin1(|v| match v {
+                Value::Cons(n, args) if n == "Some" && args.len() == 1 => Ok(args[0].clone()),
+                Value::Cons(n, _) if n == "None" => Err(RuntimeError::new("Option.unwrap on None")),
+                other => Err(RuntimeError::new(format!(
+                    "Option.unwrap expects Option, got {}",
+                    show(&other)
+                ))),
+            }),
+        )]),
     );
     env = env.extend(
         "Result".into(),
-        Value::Record(vec![("unwrap".into(), builtin1(|v| match v {
-            Value::Cons(n, args) if n == "Ok" && args.len() == 1 => Ok(args[0].clone()),
-            Value::Cons(n, args) if n == "Err" && args.len() == 1 => {
-                Err(RuntimeError::new(format!(
-                    "Result.unwrap on Err: {}",
-                    show(&args[0])
-                )))
-            }
-            other => Err(RuntimeError::new(format!(
-                "Result.unwrap expects Result, got {}",
-                show(&other)
-            ))),
-        }))]),
+        Value::Record(vec![(
+            "unwrap".into(),
+            builtin1(|v| match v {
+                Value::Cons(n, args) if n == "Ok" && args.len() == 1 => Ok(args[0].clone()),
+                Value::Cons(n, args) if n == "Err" && args.len() == 1 => Err(RuntimeError::new(
+                    format!("Result.unwrap on Err: {}", show(&args[0])),
+                )),
+                other => Err(RuntimeError::new(format!(
+                    "Result.unwrap expects Result, got {}",
+                    show(&other)
+                ))),
+            }),
+        )]),
     );
     env
 }
@@ -542,10 +621,12 @@ fn sum_series(xs: Value) -> Result<Value, RuntimeError> {
                 for v in vs {
                     match v {
                         Value::Float(f) => acc += f,
-                        other => return Err(RuntimeError::new(format!(
-                            "sum: mixed types, got {}",
-                            show(&other)
-                        ))),
+                        other => {
+                            return Err(RuntimeError::new(format!(
+                                "sum: mixed types, got {}",
+                                show(&other)
+                            )));
+                        }
                     }
                 }
                 Ok(Value::Float(acc))
@@ -554,10 +635,12 @@ fn sum_series(xs: Value) -> Result<Value, RuntimeError> {
                 for v in vs {
                     match v {
                         Value::Int(n) => acc += n,
-                        other => return Err(RuntimeError::new(format!(
-                            "sum: mixed types, got {}",
-                            show(&other)
-                        ))),
+                        other => {
+                            return Err(RuntimeError::new(format!(
+                                "sum: mixed types, got {}",
+                                show(&other)
+                            )));
+                        }
                     }
                 }
                 Ok(Value::Int(acc))
@@ -583,10 +666,12 @@ fn mean_series(xs: Value) -> Result<Value, RuntimeError> {
         match v {
             Value::Float(f) => acc += f,
             Value::Int(i) => acc += i as f64,
-            other => return Err(RuntimeError::new(format!(
-                "mean expects numeric series, got {}",
-                show(&other)
-            ))),
+            other => {
+                return Err(RuntimeError::new(format!(
+                    "mean expects numeric series, got {}",
+                    show(&other)
+                )));
+            }
         }
     }
     Ok(Value::Float(acc / n))
@@ -602,19 +687,23 @@ fn extremum_series(xs: Value, take_min: bool) -> Result<Value, RuntimeError> {
     let mut best: f64 = match &vs[0] {
         Value::Float(f) => *f,
         Value::Int(i) => *i as f64,
-        other => return Err(RuntimeError::new(format!(
-            "min/max expects numeric, got {}",
-            show(other)
-        ))),
+        other => {
+            return Err(RuntimeError::new(format!(
+                "min/max expects numeric, got {}",
+                show(other)
+            )));
+        }
     };
     for v in &vs[1..] {
         let n = match v {
             Value::Float(f) => *f,
             Value::Int(i) => *i as f64,
-            other => return Err(RuntimeError::new(format!(
-                "min/max expects numeric, got {}",
-                show(other)
-            ))),
+            other => {
+                return Err(RuntimeError::new(format!(
+                    "min/max expects numeric, got {}",
+                    show(other)
+                )));
+            }
         };
         if (take_min && n < best) || (!take_min && n > best) {
             best = n;
@@ -639,10 +728,12 @@ fn std_series(xs: Value) -> Result<Value, RuntimeError> {
         let x = match v {
             Value::Float(f) => f,
             Value::Int(i) => i as f64,
-            other => return Err(RuntimeError::new(format!(
-                "std expects numeric, got {}",
-                show(&other)
-            ))),
+            other => {
+                return Err(RuntimeError::new(format!(
+                    "std expects numeric, got {}",
+                    show(&other)
+                )));
+            }
         };
         let d = x - mu;
         acc += d * d;
@@ -693,8 +784,10 @@ pub fn show(v: &Value) -> String {
             format!("[{}]", parts.join(", "))
         }
         Value::Record(fs) => {
-            let parts: Vec<String> =
-                fs.iter().map(|(n, v)| format!("{n} = {}", show(v))).collect();
+            let parts: Vec<String> = fs
+                .iter()
+                .map(|(n, v)| format!("{n} = {}", show(v)))
+                .collect();
             format!("{{ {} }}", parts.join(", "))
         }
         Value::Cons(name, args) => {
@@ -711,7 +804,13 @@ pub fn show(v: &Value) -> String {
 
 fn eval_stmt(stmt: &Stmt, env: &mut Env) -> Result<Value, RuntimeError> {
     match stmt {
-        Stmt::Let { name, params, body, recursive, .. } => {
+        Stmt::Let {
+            name,
+            params,
+            body,
+            recursive,
+            ..
+        } => {
             if *recursive {
                 *env = env.extend(name.clone(), Value::Unit);
                 let value = if params.is_empty() {
@@ -748,13 +847,19 @@ fn eval_stmt(stmt: &Stmt, env: &mut Env) -> Result<Value, RuntimeError> {
         Stmt::TypeDecl(decl) => {
             if let TypeDeclBody::Sum(variants) = &decl.body {
                 for v in variants {
-                    *env = env
-                        .extend(v.name.clone(), make_constructor(v.name.clone(), v.args.len()));
+                    *env = env.extend(
+                        v.name.clone(),
+                        make_constructor(v.name.clone(), v.args.len()),
+                    );
                 }
             }
             Ok(Value::Unit)
         }
-        Stmt::For { binding, iter, body } => {
+        Stmt::For {
+            binding,
+            iter,
+            body,
+        } => {
             let iter_v = eval(iter, env)?;
             match iter_v {
                 Value::Series(vs) => {
@@ -897,18 +1002,28 @@ fn match_pat(pat: &Pat, value: &Value) -> Option<Vec<(String, Value)>> {
                 return None;
             }
             let mut bs = Vec::new();
-            for (p, v) in parts.iter().take(fixed_before).zip(vs.iter().take(fixed_before)) {
+            for (p, v) in parts
+                .iter()
+                .take(fixed_before)
+                .zip(vs.iter().take(fixed_before))
+            {
                 if let ListPart::Pat(p) = p {
                     bs.extend(match_pat(p, v)?);
                 }
             }
-            if let Some(ListPart::Rest(name)) = parts.iter().find(|p| matches!(p, ListPart::Rest(_))) {
+            if let Some(ListPart::Rest(name)) =
+                parts.iter().find(|p| matches!(p, ListPart::Rest(_)))
+            {
                 let rest = &vs[fixed_before..total - fixed_after];
                 if let Some(n) = name {
                     bs.push((n.clone(), Value::Series(rest.to_vec())));
                 }
             }
-            for (p, v) in parts.iter().rev().take(fixed_after).zip(vs.iter().rev().take(fixed_after))
+            for (p, v) in parts
+                .iter()
+                .rev()
+                .take(fixed_after)
+                .zip(vs.iter().rev().take(fixed_after))
             {
                 if let ListPart::Pat(p) = p {
                     bs.extend(match_pat(p, v)?);
@@ -973,12 +1088,8 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, RuntimeError> {
         Expr::Postfix(vela_parser::PostOp::Question, inner) => {
             let v = eval(inner, env)?;
             match &v {
-                Value::Cons(n, args) if n == "Ok" && args.len() == 1 => {
-                    Ok(args[0].clone())
-                }
-                Value::Cons(n, _) if n == "Err" => {
-                    Err(RuntimeError::short_circuit(v))
-                }
+                Value::Cons(n, args) if n == "Ok" && args.len() == 1 => Ok(args[0].clone()),
+                Value::Cons(n, _) if n == "Err" => Err(RuntimeError::short_circuit(v)),
                 other => Err(RuntimeError::new(format!(
                     "`?` expects a Result, got {}",
                     show(other)
@@ -1068,20 +1179,19 @@ fn apply(f: Value, arg: Value) -> Result<Value, RuntimeError> {
             if params.is_empty() {
                 return Err(RuntimeError::new("calling a zero-parameter closure"));
             }
-            let bindings = match_pat(&params[0], &arg)
-                .ok_or_else(|| RuntimeError::new(format!(
+            let bindings = match_pat(&params[0], &arg).ok_or_else(|| {
+                RuntimeError::new(format!(
                     "argument {} does not match parameter pattern",
                     show(&arg)
-                )))?;
+                ))
+            })?;
             let mut inner_env = env;
             for (n, v) in bindings {
                 inner_env = inner_env.extend(n, v);
             }
             if params.len() == 1 {
                 match eval(&body, &inner_env) {
-                    Err(e) if e.short_circuit.is_some() => {
-                        Ok(e.short_circuit.unwrap())
-                    }
+                    Err(e) if e.short_circuit.is_some() => Ok(e.short_circuit.unwrap()),
                     other => other,
                 }
             } else {
@@ -1114,9 +1224,7 @@ fn eval_binop(op: BinOp, l: &Expr, r: &Expr, env: &Env) -> Result<Value, Runtime
         (BinOp::Mul, Value::Int(a), Value::Int(b)) => Ok(Value::Int(a * b)),
         (BinOp::Div, Value::Int(a), Value::Int(b)) if *b != 0 => Ok(Value::Int(a / b)),
         (BinOp::Mod, Value::Int(a), Value::Int(b)) if *b != 0 => Ok(Value::Int(a % b)),
-        (BinOp::Pow, Value::Int(a), Value::Int(b)) if *b >= 0 => {
-            Ok(Value::Int(a.pow(*b as u32)))
-        }
+        (BinOp::Pow, Value::Int(a), Value::Int(b)) if *b >= 0 => Ok(Value::Int(a.pow(*b as u32))),
         (BinOp::Add, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a + b)),
         (BinOp::Sub, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a - b)),
         (BinOp::Mul, Value::Float(a), Value::Float(b)) => Ok(Value::Float(a * b)),

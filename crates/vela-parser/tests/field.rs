@@ -52,6 +52,9 @@ fn field_then_application() {
 fn field_on_record_literal() {
     assert_eq!(
         p("{ x = 1 }.x"),
-        field(Expr::Record(vec![("x".into(), Expr::Lit(Lit::Int(1)))]), "x"),
+        field(
+            Expr::Record(vec![("x".into(), Expr::Lit(Lit::Int(1)))]),
+            "x"
+        ),
     );
 }

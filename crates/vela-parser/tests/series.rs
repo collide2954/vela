@@ -31,7 +31,10 @@ fn integer_series() {
 
 #[test]
 fn float_series() {
-    assert_eq!(p("[1.0, 2.5, 3.0]"), Expr::Series(vec![flit(1.0), flit(2.5), flit(3.0)]));
+    assert_eq!(
+        p("[1.0, 2.5, 3.0]"),
+        Expr::Series(vec![flit(1.0), flit(2.5), flit(3.0)])
+    );
 }
 
 #[test]

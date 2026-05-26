@@ -2,7 +2,10 @@ use vela_check::{Type, check_expr, check_program};
 
 #[test]
 fn length_of_int_series() {
-    assert_eq!(check_expr("length [1, 2, 3]").expect("type-checks"), Type::Int);
+    assert_eq!(
+        check_expr("length [1, 2, 3]").expect("type-checks"),
+        Type::Int
+    );
 }
 
 #[test]

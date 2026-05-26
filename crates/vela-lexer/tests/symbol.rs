@@ -20,12 +20,18 @@ fn symbol_species() {
 
 #[test]
 fn symbol_with_underscore_and_digits() {
-    assert_eq!(kinds(":petal_length_2"), vec![TokenKind::Sym("petal_length_2".into())]);
+    assert_eq!(
+        kinds(":petal_length_2"),
+        vec![TokenKind::Sym("petal_length_2".into())]
+    );
 }
 
 #[test]
 fn symbol_starting_with_underscore() {
-    assert_eq!(kinds(":_internal"), vec![TokenKind::Sym("_internal".into())]);
+    assert_eq!(
+        kinds(":_internal"),
+        vec![TokenKind::Sym("_internal".into())]
+    );
 }
 
 #[test]

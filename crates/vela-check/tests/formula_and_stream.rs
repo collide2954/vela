@@ -18,10 +18,7 @@ fn formula_with_complex_rhs() {
 
 #[test]
 fn stream_unfold_yields_series() {
-    let result = check_expr(
-        "Stream.unfold (fn s -> Some (s, s + 1)) 0",
-    )
-    .expect("type-checks");
+    let result = check_expr("Stream.unfold (fn s -> Some (s, s + 1)) 0").expect("type-checks");
     if let Type::Series(_) = result {
         return;
     }

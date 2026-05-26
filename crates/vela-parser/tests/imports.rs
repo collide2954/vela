@@ -19,7 +19,10 @@ fn import_single_module() {
 
 #[test]
 fn import_dotted_path() {
-    assert_eq!(s("import stats.dist"), imp(vec!["stats", "dist"], ImportKind::All));
+    assert_eq!(
+        s("import stats.dist"),
+        imp(vec!["stats", "dist"], ImportKind::All)
+    );
 }
 
 #[test]

@@ -76,17 +76,20 @@ impl Diagnostic {
         out.push('\n');
         if let Some(span) = &self.primary {
             let (line_no, col_no, line_text) = line_info(source, span.start);
-            out.push_str(&format!(
-                "  --> {}:{line_no}:{col_no}\n",
-                self.source_path
-            ));
+            out.push_str(&format!("  --> {}:{line_no}:{col_no}\n", self.source_path));
             let gutter_width = digit_count(line_no).max(2);
             let gutter = " ".repeat(gutter_width);
             out.push_str(&format!("{gutter} |\n"));
-            out.push_str(&format!("{:>w$} | {line_text}\n", line_no, w = gutter_width));
+            out.push_str(&format!(
+                "{:>w$} | {line_text}\n",
+                line_no,
+                w = gutter_width
+            ));
             let span_in_line_start = col_no.saturating_sub(1);
-            let span_in_line_len =
-                span.len().min(line_text.len().saturating_sub(span_in_line_start)).max(1);
+            let span_in_line_len = span
+                .len()
+                .min(line_text.len().saturating_sub(span_in_line_start))
+                .max(1);
             let carets = "^".repeat(span_in_line_len);
             let pad = " ".repeat(span_in_line_start);
             out.push_str(&format!("{gutter} | {pad}{carets}\n"));

@@ -43,10 +43,22 @@ fn prop_case_with_typed_param_and_guard() {
     prop "positive" (n : Int) when n > 0 = n + 1 > n"#);
     if let Stmt::Tests(cases) = stmt {
         assert_eq!(cases.len(), 1);
-        if let TestCase::Prop { name, params, guard, .. } = &cases[0] {
+        if let TestCase::Prop {
+            name,
+            params,
+            guard,
+            ..
+        } = &cases[0]
+        {
             assert_eq!(name, "positive");
             assert_eq!(params.len(), 1);
-            assert_eq!(params[0], Param { pat: vela_parser::Pat::Var("n".into()), ty: Some(con("Int")) });
+            assert_eq!(
+                params[0],
+                Param {
+                    pat: vela_parser::Pat::Var("n".into()),
+                    ty: Some(con("Int"))
+                }
+            );
             assert!(guard.is_some());
         } else {
             panic!("expected prop case");

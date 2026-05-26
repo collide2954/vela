@@ -32,7 +32,10 @@ standardize [1.0, 2.0, 3.0]"#;
 
 #[test]
 fn string_length() {
-    assert_eq!(check_expr(r#"String.length "abc""#).expect("type-checks"), Type::Int);
+    assert_eq!(
+        check_expr(r#"String.length "abc""#).expect("type-checks"),
+        Type::Int
+    );
 }
 
 #[test]

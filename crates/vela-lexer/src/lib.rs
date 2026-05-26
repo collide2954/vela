@@ -351,7 +351,10 @@ impl<'a> Lexer<'a> {
     }
 
     fn synthetic(&self, kind: TokenKind) -> Token {
-        Token { kind, span: self.pos..self.pos }
+        Token {
+            kind,
+            span: self.pos..self.pos,
+        }
     }
 
     fn emit_eof_tokens(&mut self) {
@@ -400,10 +403,18 @@ impl<'a> Lexer<'a> {
     fn track_paren(&mut self, kind: &TokenKind) {
         match kind {
             TokenKind::Punct(
-                Punct::LParen | Punct::LBracket | Punct::LBrace | Punct::ArrayOpen | Punct::FrameOpen,
+                Punct::LParen
+                | Punct::LBracket
+                | Punct::LBrace
+                | Punct::ArrayOpen
+                | Punct::FrameOpen,
             ) => self.paren_depth += 1,
             TokenKind::Punct(
-                Punct::RParen | Punct::RBracket | Punct::RBrace | Punct::ArrayClose | Punct::FrameClose,
+                Punct::RParen
+                | Punct::RBracket
+                | Punct::RBrace
+                | Punct::ArrayClose
+                | Punct::FrameClose,
             ) if self.paren_depth > 0 => self.paren_depth -= 1,
             _ => {}
         }
@@ -439,7 +450,11 @@ impl<'a> Lexer<'a> {
         if b == b'"' {
             return Some(self.lex_string());
         }
-        if b == b':' && self.peek_at(1).is_some_and(|b| b.is_ascii_alphabetic() || b == b'_') {
+        if b == b':'
+            && self
+                .peek_at(1)
+                .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+        {
             return Some(self.lex_symbol());
         }
         if b.is_ascii_alphabetic() || b == b'_' {
@@ -509,19 +524,22 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
                 TokenKind::Decimal(buf)
             }
-            _ if is_float => {
-                TokenKind::Float(buf.parse().expect("digit-only float buffer parses"))
-            }
+            _ if is_float => TokenKind::Float(buf.parse().expect("digit-only float buffer parses")),
             _ => TokenKind::Int(buf.parse().expect("digit-only int buffer parses")),
         };
 
-        Token { kind, span: start..self.pos }
+        Token {
+            kind,
+            span: start..self.pos,
+        }
     }
 
     fn suffix(&self) -> Option<u8> {
         let s = self.peek()?;
         if matches!(s, b'u' | b'n' | b'd')
-            && !self.peek_at(1).is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+            && !self
+                .peek_at(1)
+                .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
         {
             Some(s)
         } else {
@@ -560,7 +578,10 @@ impl<'a> Lexer<'a> {
             }
             _ => TokenKind::Int(value as i64),
         };
-        Token { kind, span: start..self.pos }
+        Token {
+            kind,
+            span: start..self.pos,
+        }
     }
 
     fn eat_digits(&mut self, buf: &mut String) {
@@ -590,7 +611,10 @@ impl<'a> Lexer<'a> {
             }
         }
         let body = self.src[body_start..self.pos].to_string();
-        Token { kind: TokenKind::Sym(body), span: start..self.pos }
+        Token {
+            kind: TokenKind::Sym(body),
+            span: start..self.pos,
+        }
     }
 
     fn lex_string(&mut self) -> Token {
@@ -601,7 +625,10 @@ impl<'a> Lexer<'a> {
             match b {
                 b'"' => {
                     self.pos += 1;
-                    return Token { kind: TokenKind::Str(buf), span: start..self.pos };
+                    return Token {
+                        kind: TokenKind::Str(buf),
+                        span: start..self.pos,
+                    };
                 }
                 b'\\' => {
                     self.pos += 1;
@@ -624,7 +651,10 @@ impl<'a> Lexer<'a> {
                 }
             }
         }
-        Token { kind: TokenKind::Str(buf), span: start..self.pos }
+        Token {
+            kind: TokenKind::Str(buf),
+            span: start..self.pos,
+        }
     }
 
     fn lex_word(&mut self) -> Token {
@@ -677,7 +707,10 @@ impl<'a> Lexer<'a> {
             "not" => TokenKind::Keyword(Keyword::Not),
             other => TokenKind::Ident(other.to_string()),
         };
-        Token { kind, span: start..self.pos }
+        Token {
+            kind,
+            span: start..self.pos,
+        }
     }
 
     fn lex_punct(&mut self) -> Option<Token> {
@@ -742,7 +775,10 @@ impl<'a> Lexer<'a> {
             b'=' => {
                 if self.peek_at(1) == Some(b'=') {
                     self.pos += 2;
-                    return Some(Token { kind: TokenKind::Op(Op::Eq), span: start..self.pos });
+                    return Some(Token {
+                        kind: TokenKind::Op(Op::Eq),
+                        span: start..self.pos,
+                    });
                 }
                 kind = Some(TokenKind::Op(Op::Assign));
             }
@@ -765,14 +801,20 @@ impl<'a> Lexer<'a> {
                 }
                 Some(b'=') => {
                     self.pos += 2;
-                    return Some(Token { kind: TokenKind::Op(Op::Le), span: start..self.pos });
+                    return Some(Token {
+                        kind: TokenKind::Op(Op::Le),
+                        span: start..self.pos,
+                    });
                 }
                 _ => kind = Some(TokenKind::Op(Op::Lt)),
             },
             b'>' => {
                 if self.peek_at(1) == Some(b'=') {
                     self.pos += 2;
-                    return Some(Token { kind: TokenKind::Op(Op::Ge), span: start..self.pos });
+                    return Some(Token {
+                        kind: TokenKind::Op(Op::Ge),
+                        span: start..self.pos,
+                    });
                 }
                 kind = Some(TokenKind::Op(Op::Gt));
             }
@@ -820,7 +862,10 @@ impl<'a> Lexer<'a> {
             _ => return None,
         }
         self.pos += 1;
-        kind.map(|k| Token { kind: k, span: start..self.pos })
+        kind.map(|k| Token {
+            kind: k,
+            span: start..self.pos,
+        })
     }
 }
 

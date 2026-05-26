@@ -14,7 +14,12 @@ fn var(s: &str) -> Expr {
     Expr::Var(s.into())
 }
 fn rec(fields: &[(&str, Expr)]) -> Expr {
-    Expr::Record(fields.iter().map(|(n, e)| ((*n).into(), e.clone())).collect())
+    Expr::Record(
+        fields
+            .iter()
+            .map(|(n, e)| ((*n).into(), e.clone()))
+            .collect(),
+    )
 }
 
 #[test]

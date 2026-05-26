@@ -3,7 +3,10 @@ use vela_check::{Type, check_program};
 #[test]
 fn bare_record_literal_becomes_nominal_in_typed_context() {
     let src = "type Point = { x : Float, y : Float }\nlet p : Point = { x = 1.0, y = 2.0 }\np";
-    assert_eq!(check_program(src).expect("ok"), Type::Named("Point".into(), vec![]));
+    assert_eq!(
+        check_program(src).expect("ok"),
+        Type::Named("Point".into(), vec![])
+    );
 }
 
 #[test]
@@ -14,8 +17,7 @@ fn untyped_record_literal_stays_structural() {
 
 #[test]
 fn field_access_on_nominal_record() {
-    let src =
-        "type Point = { x : Float, y : Float }\nlet p : Point = { x = 1.0, y = 2.0 }\np.x";
+    let src = "type Point = { x : Float, y : Float }\nlet p : Point = { x = 1.0, y = 2.0 }\np.x";
     assert_eq!(check_program(src).expect("ok"), Type::Float);
 }
 

@@ -55,10 +55,7 @@ fn application_through_pipe() {
 
 #[test]
 fn three_arg_application_with_literal_args() {
-    assert_eq!(
-        p("add 1 2"),
-        app(app(var("add"), lit(1)), lit(2)),
-    );
+    assert_eq!(p("add 1 2"), app(app(var("add"), lit(1)), lit(2)),);
 }
 
 #[test]

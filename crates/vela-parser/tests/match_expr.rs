@@ -23,7 +23,11 @@ fn matchx(scrut: Expr, arms: Vec<MatchArm>) -> Expr {
     Expr::Match(Box::new(scrut), arms)
 }
 fn arm(pat: Pat, body: Expr) -> MatchArm {
-    MatchArm { pat, guard: None, body }
+    MatchArm {
+        pat,
+        guard: None,
+        body,
+    }
 }
 
 #[test]

@@ -21,7 +21,8 @@ fn question_short_circuits_err() {
 
 #[test]
 fn question_threads_through_chain() {
-    let src = "let chain a b =\n    let x = a?\n    let y = b?\n    Ok (x + y)\nchain (Ok 3) (Ok 4)";
+    let src =
+        "let chain a b =\n    let x = a?\n    let y = b?\n    Ok (x + y)\nchain (Ok 3) (Ok 4)";
     assert_eq!(r(src), Value::Cons("Ok".into(), vec![Value::Int(7)]));
 }
 

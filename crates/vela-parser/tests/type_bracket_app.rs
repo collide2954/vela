@@ -1,7 +1,10 @@
 use vela_parser::{Stmt, Ty, parse_stmt};
 
 fn parse_let_annotation_type(src: &str) -> Ty {
-    if let Stmt::Let { return_ty: Some(t), .. } = parse_stmt(src).expect("parses") {
+    if let Stmt::Let {
+        return_ty: Some(t), ..
+    } = parse_stmt(src).expect("parses")
+    {
         t
     } else {
         panic!("expected let with return type annotation");
@@ -20,7 +23,10 @@ fn parse_var_annotation_type(src: &str) -> Ty {
 fn option_t_bracket() {
     assert_eq!(
         parse_let_annotation_type("let m : Option[Int] = m"),
-        Ty::App(Box::new(Ty::Con("Option".into())), vec![Ty::Con("Int".into())]),
+        Ty::App(
+            Box::new(Ty::Con("Option".into())),
+            vec![Ty::Con("Int".into())]
+        ),
     );
 }
 
@@ -61,6 +67,9 @@ fn nested_option_of_series() {
 fn var_bracket_annotation_too() {
     assert_eq!(
         parse_var_annotation_type("var x : Option[Int] = x"),
-        Ty::App(Box::new(Ty::Con("Option".into())), vec![Ty::Con("Int".into())]),
+        Ty::App(
+            Box::new(Ty::Con("Option".into())),
+            vec![Ty::Con("Int".into())]
+        ),
     );
 }

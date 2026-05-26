@@ -60,7 +60,10 @@ fn comparisons() {
 
 #[test]
 fn string_concat() {
-    assert_eq!(r(r#""hello " ++ "world""#), Value::Str("hello world".into()));
+    assert_eq!(
+        r(r#""hello " ++ "world""#),
+        Value::Str("hello world".into())
+    );
 }
 
 #[test]
@@ -102,8 +105,7 @@ fn let_rec_factorial() {
 
 #[test]
 fn let_rec_fibonacci() {
-    let src =
-        "let rec fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)\nfib 10";
+    let src = "let rec fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)\nfib 10";
     assert_eq!(r(src), Value::Int(55));
 }
 
@@ -171,6 +173,7 @@ fn for_loop_tuple_pattern() {
 
 #[test]
 fn match_arm_block_body() {
-    let src = "let v = Some 3\nmatch v with\n| Some x ->\n    let y = x + 1\n    y * 2\n| None -> 0";
+    let src =
+        "let v = Some 3\nmatch v with\n| Some x ->\n    let y = x + 1\n    y * 2\n| None -> 0";
     assert_eq!(r(src), Value::Int(8));
 }

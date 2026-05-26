@@ -23,7 +23,10 @@ fn empty_dataframe() {
 fn single_column_dataframe() {
     assert_eq!(
         p("{| x : [1, 2, 3] |}"),
-        Expr::DataFrameLit(vec![("x".into(), Expr::Series(vec![lit(1), lit(2), lit(3)]))]),
+        Expr::DataFrameLit(vec![(
+            "x".into(),
+            Expr::Series(vec![lit(1), lit(2), lit(3)])
+        )]),
     );
 }
 

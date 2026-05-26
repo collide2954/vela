@@ -57,6 +57,9 @@ fn mixed_simple_and_pattern_params() {
 fn simple_name_helper() {
     let p: Param = "x".into();
     assert_eq!(p.simple_name(), Some("x"));
-    let p2 = Param { pat: Pat::Lit(vela_parser::Lit::Unit), ty: None };
+    let p2 = Param {
+        pat: Pat::Lit(vela_parser::Lit::Unit),
+        ty: None,
+    };
     assert_eq!(p2.simple_name(), None);
 }

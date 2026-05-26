@@ -84,10 +84,7 @@ fn and_above_or() {
     let a = var("a");
     let b = var("b");
     let c = var("c");
-    assert_eq!(
-        p("a or b and c"),
-        bin(BinOp::Or, a, bin(BinOp::And, b, c)),
-    );
+    assert_eq!(p("a or b and c"), bin(BinOp::Or, a, bin(BinOp::And, b, c)),);
 }
 
 #[test]
@@ -108,26 +105,17 @@ fn pipe_is_left_associative() {
 
 #[test]
 fn unary_minus() {
-    assert_eq!(
-        p("-x"),
-        Expr::UnaryOp(UnOp::Neg, Box::new(var("x"))),
-    );
+    assert_eq!(p("-x"), Expr::UnaryOp(UnOp::Neg, Box::new(var("x"))),);
 }
 
 #[test]
 fn unary_not() {
-    assert_eq!(
-        p("not p"),
-        Expr::UnaryOp(UnOp::Not, Box::new(var("p"))),
-    );
+    assert_eq!(p("not p"), Expr::UnaryOp(UnOp::Not, Box::new(var("p"))),);
 }
 
 #[test]
 fn postfix_question() {
-    assert_eq!(
-        p("x?"),
-        Expr::Postfix(PostOp::Question, Box::new(var("x"))),
-    );
+    assert_eq!(p("x?"), Expr::Postfix(PostOp::Question, Box::new(var("x"))),);
 }
 
 #[test]

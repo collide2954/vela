@@ -21,10 +21,7 @@ fn dataframe_with_schema_typed_column_access() {
 fn dataframe_with_schema_int_column() {
     let src = "let df : DataFrame[{ x : Float, y : Int }] = {| x : [1.0, 2.0], y : [1, 2] |}\ndf.y";
     let t = check_program(src).expect("ok");
-    assert_eq!(
-        t,
-        Type::Series(Box::new(Type::Option(Box::new(Type::Int)))),
-    );
+    assert_eq!(t, Type::Series(Box::new(Type::Option(Box::new(Type::Int)))),);
 }
 
 #[test]

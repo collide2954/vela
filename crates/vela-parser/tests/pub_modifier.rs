@@ -20,9 +20,8 @@ fn pub_type() {
 
 #[test]
 fn pub_program_mix() {
-    let prog = parse_program(
-        "pub let mean xs = xs\npub type Color = | Red | Blue\nlet private = 1",
-    )
-    .expect("parses");
+    let prog =
+        parse_program("pub let mean xs = xs\npub type Color = | Red | Blue\nlet private = 1")
+            .expect("parses");
     assert_eq!(prog.stmts.len(), 3);
 }

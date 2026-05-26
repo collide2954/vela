@@ -11,8 +11,11 @@ fn identity_used_at_int() {
 
 #[test]
 fn identity_used_at_string() {
-    assert_eq!(t(r#"let id = fn x -> x
-id "hi""#), Type::String);
+    assert_eq!(
+        t(r#"let id = fn x -> x
+id "hi""#),
+        Type::String
+    );
 }
 
 #[test]

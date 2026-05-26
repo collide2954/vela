@@ -15,7 +15,13 @@ fn lit(n: i64) -> Expr {
 fn simple_let_binding() {
     assert_eq!(
         s("let x = 1"),
-        Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1), recursive: false },
+        Stmt::Let {
+            name: "x".into(),
+            params: vec![],
+            return_ty: None,
+            body: lit(1),
+            recursive: false
+        },
     );
 }
 
@@ -70,6 +76,10 @@ fn bare_expression_is_a_statement() {
 fn var_binding() {
     assert_eq!(
         s("var counter = 0"),
-        Stmt::Var { name: "counter".into(), ty: None, body: lit(0) },
+        Stmt::Var {
+            name: "counter".into(),
+            ty: None,
+            body: lit(0)
+        },
     );
 }

@@ -31,7 +31,11 @@ fn app_block_with_input_let_output() {
     )
     .expect("parses");
     assert_eq!(program.stmts.len(), 1);
-    if let Stmt::Let { body: Expr::AppBlock(inner), .. } = &program.stmts[0] {
+    if let Stmt::Let {
+        body: Expr::AppBlock(inner),
+        ..
+    } = &program.stmts[0]
+    {
         if let Expr::Block { stmts, trailing } = &**inner {
             assert_eq!(stmts.len(), 3);
             assert!(matches!(stmts[0], Stmt::Input { .. }));

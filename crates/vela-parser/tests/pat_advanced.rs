@@ -19,7 +19,10 @@ fn or_pattern_two_alternatives() {
     let e = p(r#"match x with | Red | Blue -> "primary""#);
     if let Expr::Match(_, arms) = e {
         assert_eq!(arms.len(), 1);
-        assert_eq!(arms[0].pat, Pat::Or(vec![cons("Red", vec![]), cons("Blue", vec![])]));
+        assert_eq!(
+            arms[0].pat,
+            Pat::Or(vec![cons("Red", vec![]), cons("Blue", vec![])])
+        );
     } else {
         panic!("expected match");
     }
@@ -31,7 +34,11 @@ fn or_pattern_three_alternatives() {
     if let Expr::Match(_, arms) = e {
         assert_eq!(
             arms[0].pat,
-            Pat::Or(vec![cons("A", vec![]), cons("B", vec![]), cons("C", vec![])]),
+            Pat::Or(vec![
+                cons("A", vec![]),
+                cons("B", vec![]),
+                cons("C", vec![])
+            ]),
         );
     } else {
         panic!("expected match");
@@ -43,7 +50,10 @@ fn or_pattern_does_not_eat_next_arm() {
     let e = p("match x with | A | B -> 1 | C -> 2");
     if let Expr::Match(_, arms) = e {
         assert_eq!(arms.len(), 2);
-        assert_eq!(arms[0].pat, Pat::Or(vec![cons("A", vec![]), cons("B", vec![])]));
+        assert_eq!(
+            arms[0].pat,
+            Pat::Or(vec![cons("A", vec![]), cons("B", vec![])])
+        );
         assert_eq!(arms[0].body, lit(1));
         assert_eq!(arms[1].pat, cons("C", vec![]));
         assert_eq!(arms[1].body, lit(2));

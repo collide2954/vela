@@ -4,7 +4,10 @@ use vela_check::check_program_with_warnings;
 fn shadowing_let_emits_w0050() {
     let src = "let x = 1\nlet x = x + 1\nx";
     let (_, ws) = check_program_with_warnings(src).expect("type-checks");
-    assert!(ws.iter().any(|w| w.code == "W0050" && w.message.contains("x")));
+    assert!(
+        ws.iter()
+            .any(|w| w.code == "W0050" && w.message.contains("x"))
+    );
 }
 
 #[test]

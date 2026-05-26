@@ -15,7 +15,10 @@ fn lit(n: i64) -> Expr {
 fn simple_mutation() {
     assert_eq!(
         s("x <- y"),
-        Stmt::Mutate { name: "x".into(), body: var("y") },
+        Stmt::Mutate {
+            name: "x".into(),
+            body: var("y")
+        },
     );
 }
 
@@ -34,6 +37,9 @@ fn mutation_with_expression() {
 fn mutation_to_literal() {
     assert_eq!(
         s("x <- 0"),
-        Stmt::Mutate { name: "x".into(), body: lit(0) },
+        Stmt::Mutate {
+            name: "x".into(),
+            body: lit(0)
+        },
     );
 }

@@ -60,8 +60,5 @@ fn result_can_be_in_series() {
 #[test]
 fn unify_some_and_none_in_series() {
     // [Some 1, None] should give Series[Option[Int]]
-    assert_eq!(
-        t("[Some 1, None]"),
-        Type::Series(Box::new(opt(Type::Int))),
-    );
+    assert_eq!(t("[Some 1, None]"), Type::Series(Box::new(opt(Type::Int))),);
 }

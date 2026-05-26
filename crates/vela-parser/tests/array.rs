@@ -48,10 +48,7 @@ fn three_row_array() {
 fn float_array() {
     assert_eq!(
         p("[| 1.0, 2.0 ; 3.0, 4.0 |]"),
-        Expr::ArrayLit(vec![
-            vec![flit(1.0), flit(2.0)],
-            vec![flit(3.0), flit(4.0)],
-        ]),
+        Expr::ArrayLit(vec![vec![flit(1.0), flit(2.0)], vec![flit(3.0), flit(4.0)],]),
     );
 }
 

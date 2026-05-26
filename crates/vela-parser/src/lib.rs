@@ -18,25 +18,60 @@ pub enum Stmt {
         recursive: bool,
     },
     LetRecGroup(Vec<LetBinding>),
-    Var { name: String, ty: Option<Ty>, body: Expr },
-    Mutate { name: String, body: Expr },
-    For { binding: Pat, iter: Expr, body: Expr },
-    Destructure { pat: Pat, body: Expr },
+    Var {
+        name: String,
+        ty: Option<Ty>,
+        body: Expr,
+    },
+    Mutate {
+        name: String,
+        body: Expr,
+    },
+    For {
+        binding: Pat,
+        iter: Expr,
+        body: Expr,
+    },
+    Destructure {
+        pat: Pat,
+        body: Expr,
+    },
     TypeDecl(TypeDecl),
     TraitDecl(TraitDecl),
     Impl(ImplBlock),
     Tests(Vec<TestCase>),
-    Extern { abi: String, signatures: Vec<TraitMethodSig> },
-    Input { name: String, body: Expr },
-    Output { name: String, body: Expr },
-    Import { path: Vec<String>, kind: ImportKind, public: bool },
+    Extern {
+        abi: String,
+        signatures: Vec<TraitMethodSig>,
+    },
+    Input {
+        name: String,
+        body: Expr,
+    },
+    Output {
+        name: String,
+        body: Expr,
+    },
+    Import {
+        path: Vec<String>,
+        kind: ImportKind,
+        public: bool,
+    },
     Expr(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TestCase {
-    Test { name: String, body: Expr },
-    Prop { name: String, params: Vec<Param>, guard: Option<Expr>, body: Expr },
+    Test {
+        name: String,
+        body: Expr,
+    },
+    Prop {
+        name: String,
+        params: Vec<Param>,
+        guard: Option<Expr>,
+        body: Expr,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -84,19 +119,29 @@ pub struct Param {
 
 impl Param {
     pub fn simple_name(&self) -> Option<&str> {
-        if let Pat::Var(n) = &self.pat { Some(n) } else { None }
+        if let Pat::Var(n) = &self.pat {
+            Some(n)
+        } else {
+            None
+        }
     }
 }
 
 impl From<&str> for Param {
     fn from(name: &str) -> Self {
-        Param { pat: Pat::Var(name.into()), ty: None }
+        Param {
+            pat: Pat::Var(name.into()),
+            ty: None,
+        }
     }
 }
 
 impl From<String> for Param {
     fn from(name: String) -> Self {
-        Param { pat: Pat::Var(name), ty: None }
+        Param {
+            pat: Pat::Var(name),
+            ty: None,
+        }
     }
 }
 
@@ -156,7 +201,10 @@ pub enum Expr {
     DataFrameLit(Vec<(String, Expr)>),
     ArrayLit(Vec<Vec<Expr>>),
     Sym(String),
-    Block { stmts: Vec<Stmt>, trailing: Option<Box<Expr>> },
+    Block {
+        stmts: Vec<Stmt>,
+        trailing: Option<Box<Expr>>,
+    },
     Scope(Box<Expr>),
     Spawn(Box<Expr>),
     AppBlock(Box<Expr>),
@@ -239,7 +287,11 @@ pub struct ParseError {
 
 impl ParseError {
     fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into(), span: None, code: "E0001" }
+        Self {
+            message: message.into(),
+            span: None,
+            code: "E0001",
+        }
     }
 
     fn with_span(mut self, span: Span) -> Self {
@@ -291,7 +343,12 @@ struct Parser {
 impl Parser {
     fn new(src: &str) -> Self {
         let tokens: Vec<Token> = lex(src).collect();
-        Self { tokens, pos: 0, eof_offset: src.len(), last_was_block: false }
+        Self {
+            tokens,
+            pos: 0,
+            eof_offset: src.len(),
+            last_was_block: false,
+        }
     }
 
     fn skip_newlines(&mut self) {
@@ -321,14 +378,12 @@ impl Parser {
         let span = self.current_span();
         match self.bump() {
             Some(ref t) if t == expected => Ok(()),
-            Some(other) => Err(ParseError::new(format!(
-                "expected {expected}, found {other}"
-            ))
-            .with_span(span)),
-            None => Err(ParseError::new(format!(
-                "expected {expected}, found end of input"
-            ))
-            .with_span(span)),
+            Some(other) => {
+                Err(ParseError::new(format!("expected {expected}, found {other}")).with_span(span))
+            }
+            None => Err(
+                ParseError::new(format!("expected {expected}, found end of input")).with_span(span),
+            ),
         }
     }
 
@@ -337,10 +392,7 @@ impl Parser {
         match self.peek() {
             Some(TokenKind::Keyword(Keyword::Let)) => {
                 self.bump();
-                let recursive = if matches!(
-                    self.peek(),
-                    Some(TokenKind::Keyword(Keyword::Rec))
-                ) {
+                let recursive = if matches!(self.peek(), Some(TokenKind::Keyword(Keyword::Rec))) {
                     self.bump();
                     true
                 } else {
@@ -396,7 +448,11 @@ impl Parser {
                 let iter = self.parse_expr_bp(0)?;
                 self.expect(&TokenKind::Punct(Punct::Colon))?;
                 let body = self.parse_body_after_block_intro()?;
-                Ok(Stmt::For { binding, iter, body })
+                Ok(Stmt::For {
+                    binding,
+                    iter,
+                    body,
+                })
             }
             Some(TokenKind::Keyword(Keyword::Pub)) => {
                 self.bump();
@@ -440,7 +496,11 @@ impl Parser {
                 let type_var = self.expect_ident()?;
                 self.expect(&TokenKind::Op(Op::Assign))?;
                 let methods = self.parse_trait_methods()?;
-                Ok(Stmt::TraitDecl(TraitDecl { name, type_var, methods }))
+                Ok(Stmt::TraitDecl(TraitDecl {
+                    name,
+                    type_var,
+                    methods,
+                }))
             }
             Some(TokenKind::Keyword(Keyword::Impl)) => {
                 self.bump();
@@ -448,7 +508,11 @@ impl Parser {
                 let ty = self.parse_type_atom()?;
                 self.expect(&TokenKind::Op(Op::Assign))?;
                 let methods = self.parse_impl_methods()?;
-                Ok(Stmt::Impl(ImplBlock { trait_name, ty, methods }))
+                Ok(Stmt::Impl(ImplBlock {
+                    trait_name,
+                    ty,
+                    methods,
+                }))
             }
             Some(TokenKind::Keyword(Keyword::Type)) => {
                 self.bump();
@@ -505,7 +569,10 @@ impl Parser {
                         match self.peek() {
                             Some(TokenKind::Ident(_)) => {
                                 let n = self.expect_ident()?;
-                                params.push(Param { pat: Pat::Var(n), ty: None });
+                                params.push(Param {
+                                    pat: Pat::Var(n),
+                                    ty: None,
+                                });
                             }
                             Some(TokenKind::Punct(Punct::LParen)) => {
                                 let save = self.pos;
@@ -528,7 +595,12 @@ impl Parser {
                     };
                     self.expect(&TokenKind::Op(Op::Assign))?;
                     let body = self.parse_body_after_block_intro()?;
-                    cases.push(TestCase::Prop { name, params, guard, body });
+                    cases.push(TestCase::Prop {
+                        name,
+                        params,
+                        guard,
+                        body,
+                    });
                 }
                 _ => break,
             }
@@ -543,10 +615,12 @@ impl Parser {
     fn expect_string(&mut self) -> Result<String, ParseError> {
         match self.bump() {
             Some(TokenKind::Str(s)) => Ok(s),
-            Some(other) => {
-                Err(ParseError::new(format!("expected string literal, found {other}")))
-            }
-            None => Err(ParseError::new("expected string literal, found end of input")),
+            Some(other) => Err(ParseError::new(format!(
+                "expected string literal, found {other}"
+            ))),
+            None => Err(ParseError::new(
+                "expected string literal, found end of input",
+            )),
         }
     }
 
@@ -564,7 +638,11 @@ impl Parser {
             let params = self.parse_typed_param_list()?;
             self.expect(&TokenKind::Punct(Punct::Colon))?;
             let return_ty = self.parse_type()?;
-            methods.push(TraitMethodSig { name, params, return_ty });
+            methods.push(TraitMethodSig {
+                name,
+                params,
+                return_ty,
+            });
             self.skip_newlines();
         }
         if dedent_pending && matches!(self.peek(), Some(TokenKind::Dedent)) {
@@ -589,7 +667,10 @@ impl Parser {
                 match self.peek() {
                     Some(TokenKind::Ident(_)) => {
                         let n = self.expect_ident()?;
-                        params.push(Param { pat: Pat::Var(n), ty: None });
+                        params.push(Param {
+                            pat: Pat::Var(n),
+                            ty: None,
+                        });
                     }
                     Some(TokenKind::Punct(Punct::LParen)) => {
                         let save = self.pos;
@@ -612,7 +693,12 @@ impl Parser {
             };
             self.expect(&TokenKind::Op(Op::Assign))?;
             let body = self.parse_body_after_block_intro()?;
-            methods.push(ImplMethod { name, params, return_ty, body });
+            methods.push(ImplMethod {
+                name,
+                params,
+                return_ty,
+                body,
+            });
             self.skip_newlines();
         }
         if dedent_pending && matches!(self.peek(), Some(TokenKind::Dedent)) {
@@ -663,7 +749,10 @@ impl Parser {
             return None;
         }
         self.bump();
-        Some(Param { pat: Pat::Var(name), ty: Some(ty) })
+        Some(Param {
+            pat: Pat::Var(name),
+            ty: Some(ty),
+        })
     }
 
     fn parse_import(&mut self, public: bool) -> Result<Stmt, ParseError> {
@@ -710,9 +799,7 @@ impl Parser {
             self.skip_newlines();
         }
         let body = match self.peek() {
-            Some(TokenKind::Punct(Punct::Bar)) => {
-                TypeDeclBody::Sum(self.parse_sum_variants()?)
-            }
+            Some(TokenKind::Punct(Punct::Bar)) => TypeDeclBody::Sum(self.parse_sum_variants()?),
             Some(TokenKind::Ident(name)) if starts_with_uppercase(name) => {
                 let variant = self.parse_variant_no_bar()?;
                 TypeDeclBody::Sum(vec![variant])
@@ -892,7 +979,10 @@ impl Parser {
             match self.peek() {
                 Some(TokenKind::Ident(_)) => {
                     let n = self.expect_ident()?;
-                    params.push(Param { pat: Pat::Var(n), ty: None });
+                    params.push(Param {
+                        pat: Pat::Var(n),
+                        ty: None,
+                    });
                 }
                 Some(TokenKind::Punct(Punct::LParen)) => {
                     let save = self.pos;
@@ -926,7 +1016,12 @@ impl Parser {
         };
         self.expect(&TokenKind::Op(Op::Assign))?;
         let body = self.parse_body_after_block_intro()?;
-        Ok(LetBinding { name, params, return_ty, body })
+        Ok(LetBinding {
+            name,
+            params,
+            return_ty,
+            body,
+        })
     }
 
     fn peek_after_newlines_is(&self, target: &TokenKind) -> bool {
@@ -1250,7 +1345,9 @@ impl Parser {
             }
             _ => {}
         }
-        let tok = self.bump().ok_or_else(|| ParseError::new("expected pattern atom"))?;
+        let tok = self
+            .bump()
+            .ok_or_else(|| ParseError::new("expected pattern atom"))?;
         match tok {
             TokenKind::Int(n) => Ok(Pat::Lit(Lit::Int(n))),
             TokenKind::Float(f) => Ok(Pat::Lit(Lit::Float(f))),
@@ -1265,14 +1362,18 @@ impl Parser {
                     Ok(Pat::Var(name))
                 }
             }
-            other => Err(ParseError::new(format!("unexpected token in pattern: {other}"))),
+            other => Err(ParseError::new(format!(
+                "unexpected token in pattern: {other}"
+            ))),
         }
     }
 
     fn expect_ident(&mut self) -> Result<String, ParseError> {
         match self.bump() {
             Some(TokenKind::Ident(name)) => Ok(name),
-            Some(other) => Err(ParseError::new(format!("expected identifier, found {other}"))),
+            Some(other) => Err(ParseError::new(format!(
+                "expected identifier, found {other}"
+            ))),
             None => Err(ParseError::new("expected identifier, found end of input")),
         }
     }
@@ -1310,7 +1411,9 @@ impl Parser {
                 lhs = Expr::App(Box::new(lhs), Box::new(rhs));
                 continue;
             }
-            let Some((op, l_bp, r_bp)) = self.peek().and_then(binary_op) else { break };
+            let Some((op, l_bp, r_bp)) = self.peek().and_then(binary_op) else {
+                break;
+            };
             if l_bp < min_bp {
                 break;
             }
@@ -1339,7 +1442,10 @@ impl Parser {
                     match self.peek() {
                         Some(TokenKind::Ident(_)) => {
                             let n = self.expect_ident()?;
-                            params.push(Param { pat: Pat::Var(n), ty: None });
+                            params.push(Param {
+                                pat: Pat::Var(n),
+                                ty: None,
+                            });
                         }
                         Some(TokenKind::Punct(Punct::LParen)) => {
                             let save = self.pos;
@@ -1468,9 +1574,7 @@ fn starts_type_atom(tok: &TokenKind) -> bool {
     matches!(
         tok,
         TokenKind::Ident(_)
-            | TokenKind::Punct(
-                Punct::Tick | Punct::LParen | Punct::LBrace | Punct::LBracket,
-            )
+            | TokenKind::Punct(Punct::Tick | Punct::LParen | Punct::LBrace | Punct::LBracket,)
     )
 }
 
@@ -1521,7 +1625,11 @@ fn starts_atom(tok: &TokenKind) -> bool {
             | TokenKind::Ident(_)
             | TokenKind::Sym(_)
             | TokenKind::Punct(
-                Punct::LParen | Punct::LBracket | Punct::LBrace | Punct::ArrayOpen | Punct::FrameOpen,
+                Punct::LParen
+                    | Punct::LBracket
+                    | Punct::LBrace
+                    | Punct::ArrayOpen
+                    | Punct::FrameOpen,
             )
     )
 }

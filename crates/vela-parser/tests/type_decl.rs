@@ -13,7 +13,10 @@ fn td(name: &str, params: Vec<&str>, body: TypeDeclBody) -> Stmt {
 }
 
 fn v(name: &str, args: Vec<Ty>) -> TypeVariant {
-    TypeVariant { name: name.into(), args }
+    TypeVariant {
+        name: name.into(),
+        args,
+    }
 }
 
 fn con(name: &str) -> Ty {
@@ -24,7 +27,11 @@ fn con(name: &str) -> Ty {
 fn single_variant_newtype() {
     assert_eq!(
         s("type Email = Email String"),
-        td("Email", vec![], TypeDeclBody::Sum(vec![v("Email", vec![con("String")])])),
+        td(
+            "Email",
+            vec![],
+            TypeDeclBody::Sum(vec![v("Email", vec![con("String")])])
+        ),
     );
 }
 
@@ -35,7 +42,11 @@ fn enum_of_nullary_variants() {
         td(
             "Color",
             vec![],
-            TypeDeclBody::Sum(vec![v("Red", vec![]), v("Blue", vec![]), v("Green", vec![])]),
+            TypeDeclBody::Sum(vec![
+                v("Red", vec![]),
+                v("Blue", vec![]),
+                v("Green", vec![])
+            ]),
         ),
     );
 }

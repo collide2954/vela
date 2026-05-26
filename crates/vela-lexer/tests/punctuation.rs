@@ -24,7 +24,12 @@ fn single_paren_pair() {
 fn brackets_and_braces() {
     assert_eq!(
         kinds("[]{}"),
-        vec![p(Punct::LBracket), p(Punct::RBracket), p(Punct::LBrace), p(Punct::RBrace)],
+        vec![
+            p(Punct::LBracket),
+            p(Punct::RBracket),
+            p(Punct::LBrace),
+            p(Punct::RBrace)
+        ],
     );
 }
 
@@ -62,7 +67,13 @@ fn frame_literal_delimiters() {
 fn single_char_arithmetic_ops() {
     assert_eq!(
         kinds("+ - * / %"),
-        vec![op(Op::Plus), op(Op::Minus), op(Op::Star), op(Op::Slash), op(Op::Percent)],
+        vec![
+            op(Op::Plus),
+            op(Op::Minus),
+            op(Op::Star),
+            op(Op::Slash),
+            op(Op::Percent)
+        ],
     );
 }
 
@@ -75,7 +86,14 @@ fn caret_and_tilde() {
 fn comparison_ops() {
     assert_eq!(
         kinds("== != < <= > >="),
-        vec![op(Op::Eq), op(Op::NotEq), op(Op::Lt), op(Op::Le), op(Op::Gt), op(Op::Ge)],
+        vec![
+            op(Op::Eq),
+            op(Op::NotEq),
+            op(Op::Lt),
+            op(Op::Le),
+            op(Op::Gt),
+            op(Op::Ge)
+        ],
     );
 }
 
