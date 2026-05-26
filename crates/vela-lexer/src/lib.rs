@@ -81,6 +81,7 @@ pub enum Punct {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
     Let,
+    Rec,
     Var,
     Fn,
     If,
@@ -94,7 +95,6 @@ pub enum Keyword {
     Impl,
     For,
     In,
-    Return,
     Pub,
     Module,
     Import,
@@ -143,6 +143,7 @@ impl Keyword {
     pub fn display(self) -> &'static str {
         match self {
             Keyword::Let => "let",
+            Keyword::Rec => "rec",
             Keyword::Var => "var",
             Keyword::Fn => "fn",
             Keyword::If => "if",
@@ -156,7 +157,6 @@ impl Keyword {
             Keyword::Impl => "impl",
             Keyword::For => "for",
             Keyword::In => "in",
-            Keyword::Return => "return",
             Keyword::Pub => "pub",
             Keyword::Module => "module",
             Keyword::Import => "import",
@@ -643,6 +643,7 @@ impl<'a> Lexer<'a> {
             "true" => TokenKind::Bool(true),
             "false" => TokenKind::Bool(false),
             "let" => TokenKind::Keyword(Keyword::Let),
+            "rec" => TokenKind::Keyword(Keyword::Rec),
             "var" => TokenKind::Keyword(Keyword::Var),
             "fn" => TokenKind::Keyword(Keyword::Fn),
             "if" => TokenKind::Keyword(Keyword::If),
@@ -656,7 +657,6 @@ impl<'a> Lexer<'a> {
             "impl" => TokenKind::Keyword(Keyword::Impl),
             "for" => TokenKind::Keyword(Keyword::For),
             "in" => TokenKind::Keyword(Keyword::In),
-            "return" => TokenKind::Keyword(Keyword::Return),
             "pub" => TokenKind::Keyword(Keyword::Pub),
             "module" => TokenKind::Keyword(Keyword::Module),
             "import" => TokenKind::Keyword(Keyword::Import),
