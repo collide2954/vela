@@ -5,6 +5,7 @@
 //! by `vela-jit`; the JIT path returns to the VM at instruction
 //! boundaries on bailout. See `docs/ARCHITECTURE.md`.
 
+use std::collections::HashMap;
 use std::rc::Rc;
 use vela_bytecode::{Const, FunctionId, Module, Op, Reg};
 
@@ -19,7 +20,25 @@ pub enum Value {
     Bool(bool),
     Sym(String),
     Unit,
+    Tuple(Rc<Vec<Value>>),
+    Series(Rc<Vec<Value>>),
+    Record(Rc<Vec<(String, Value)>>),
+    Cons(Rc<ConsValue>),
     Closure(Rc<Closure>),
+    Ctor(Rc<Ctor>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConsValue {
+    pub name: String,
+    pub args: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Ctor {
+    pub name: String,
+    pub arity: u16,
+    pub collected: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,7 +62,33 @@ pub fn run(module: &Module) -> Result<Value, RuntimeError> {
     let entry = module
         .entry
         .ok_or_else(|| RuntimeError::new("module has no entry function"))?;
-    exec(module, entry, &[], &[])
+    let globals = default_globals();
+    exec(module, entry, &[], &[], &globals)
+}
+
+pub fn default_globals() -> HashMap<String, Value> {
+    let mut g = HashMap::new();
+    g.insert(
+        "None".into(),
+        Value::Cons(Rc::new(ConsValue {
+            name: "None".into(),
+            args: Vec::new(),
+        })),
+    );
+    g.insert("Some".into(), ctor("Some", 1));
+    g.insert("Ok".into(), ctor("Ok", 1));
+    g.insert("Err".into(), ctor("Err", 1));
+    g.insert("true".into(), Value::Bool(true));
+    g.insert("false".into(), Value::Bool(false));
+    g
+}
+
+fn ctor(name: &str, arity: u16) -> Value {
+    Value::Ctor(Rc::new(Ctor {
+        name: name.into(),
+        arity,
+        collected: Vec::new(),
+    }))
 }
 
 fn exec(
@@ -51,6 +96,7 @@ fn exec(
     fid: FunctionId,
     args: &[Value],
     upvalues: &[Value],
+    globals: &HashMap<String, Value>,
 ) -> Result<Value, RuntimeError> {
     let f = module.function(fid);
     if args.len() != f.arity as usize {
@@ -177,6 +223,69 @@ fn exec(
             Op::GetUpval { dst, idx } => {
                 regs[*dst as usize] = upvalues[*idx as usize].clone();
             }
+            Op::MkTuple { dst, base, n } => {
+                let elems: Vec<Value> = (0..*n)
+                    .map(|i| regs[(*base + i) as usize].clone())
+                    .collect();
+                regs[*dst as usize] = Value::Tuple(Rc::new(elems));
+            }
+            Op::MkSeries { dst, base, n } => {
+                let elems: Vec<Value> = (0..*n)
+                    .map(|i| regs[(*base + i) as usize].clone())
+                    .collect();
+                regs[*dst as usize] = Value::Series(Rc::new(elems));
+            }
+            Op::MkRecord {
+                dst,
+                base,
+                n,
+                names,
+            } => {
+                let field_names = match &f.consts[*names as usize] {
+                    Const::FieldNames(ns) => ns,
+                    other => {
+                        return Err(RuntimeError::new(format!(
+                            "MkRecord names must point to FieldNames, got {other:?}"
+                        )));
+                    }
+                };
+                if field_names.len() != *n as usize {
+                    return Err(RuntimeError::new(format!(
+                        "MkRecord: {} names vs n={}",
+                        field_names.len(),
+                        n
+                    )));
+                }
+                let pairs: Vec<(String, Value)> = field_names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| (name.clone(), regs[(*base + i as u16) as usize].clone()))
+                    .collect();
+                regs[*dst as usize] = Value::Record(Rc::new(pairs));
+            }
+            Op::GetField { dst, obj, name } => {
+                let field_name = match &f.consts[*name as usize] {
+                    Const::FieldName(s) => s,
+                    other => {
+                        return Err(RuntimeError::new(format!(
+                            "GetField name must be FieldName, got {other:?}"
+                        )));
+                    }
+                };
+                let v = match &regs[*obj as usize] {
+                    Value::Record(fs) => fs
+                        .iter()
+                        .find(|(n, _)| n == field_name)
+                        .map(|(_, v)| v.clone())
+                        .ok_or_else(|| RuntimeError::new(format!("no field `{field_name}`")))?,
+                    other => {
+                        return Err(RuntimeError::new(format!(
+                            "field access on non-record: {other:?}"
+                        )));
+                    }
+                };
+                regs[*dst as usize] = v;
+            }
             Op::Call {
                 dst,
                 callee,
@@ -188,8 +297,23 @@ fn exec(
                 for i in 0..*nargs {
                     a.push(regs[(*base + i) as usize].clone());
                 }
-                let result = call_value(module, &f_v, &a)?;
+                let result = call_value(module, &f_v, &a, globals)?;
                 regs[*dst as usize] = result;
+            }
+            Op::GetGlobal { dst, name } => {
+                let name_str = match &f.consts[*name as usize] {
+                    Const::GlobalName(s) => s,
+                    other => {
+                        return Err(RuntimeError::new(format!(
+                            "GetGlobal name must be GlobalName, got {other:?}"
+                        )));
+                    }
+                };
+                let v = globals
+                    .get(name_str)
+                    .cloned()
+                    .ok_or_else(|| RuntimeError::new(format!("unbound global: {name_str}")))?;
+                regs[*dst as usize] = v;
             }
             other => {
                 return Err(RuntimeError::new(format!(
@@ -201,9 +325,37 @@ fn exec(
     }
 }
 
-fn call_value(module: &Module, f: &Value, args: &[Value]) -> Result<Value, RuntimeError> {
+fn call_value(
+    module: &Module,
+    f: &Value,
+    args: &[Value],
+    globals: &HashMap<String, Value>,
+) -> Result<Value, RuntimeError> {
     match f {
-        Value::Closure(c) => exec(module, c.function, args, &c.upvalues),
+        Value::Closure(c) => exec(module, c.function, args, &c.upvalues, globals),
+        Value::Ctor(c) => {
+            let mut collected = c.collected.clone();
+            for a in args {
+                collected.push(a.clone());
+            }
+            if collected.len() as u16 == c.arity {
+                Ok(Value::Cons(Rc::new(ConsValue {
+                    name: c.name.clone(),
+                    args: collected,
+                })))
+            } else if (collected.len() as u16) < c.arity {
+                Ok(Value::Ctor(Rc::new(Ctor {
+                    name: c.name.clone(),
+                    arity: c.arity,
+                    collected,
+                })))
+            } else {
+                Err(RuntimeError::new(format!(
+                    "constructor `{}` over-applied",
+                    c.name
+                )))
+            }
+        }
         other => Err(RuntimeError::new(format!("not callable: {other:?}"))),
     }
 }
@@ -219,7 +371,9 @@ fn const_to_value(k: &Const) -> Value {
         Const::Bool(b) => Value::Bool(*b),
         Const::Sym(s) => Value::Sym(s.clone()),
         Const::Unit => Value::Unit,
-        Const::FieldName(_) | Const::CtorName(_) | Const::GlobalName(_) => Value::Unit,
+        Const::FieldName(_) | Const::FieldNames(_) | Const::CtorName(_) | Const::GlobalName(_) => {
+            Value::Unit
+        }
     }
 }
 

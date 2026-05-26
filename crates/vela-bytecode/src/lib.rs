@@ -12,7 +12,6 @@ pub type ConstIdx = u32;
 pub type FunctionId = u32;
 pub type Offset = i32;
 pub type UpvalIdx = u16;
-pub type FieldIdx = u32;
 pub type CtorIdx = u32;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +26,7 @@ pub enum Const {
     Sym(String),
     Unit,
     FieldName(String),
+    FieldNames(Vec<String>),
     CtorName(String),
     GlobalName(String),
 }
@@ -176,7 +176,7 @@ pub enum Op {
         dst: Reg,
         base: Reg,
         n: u16,
-        fields: ConstIdx,
+        names: ConstIdx,
     },
     MkCons {
         dst: Reg,
@@ -188,11 +188,11 @@ pub enum Op {
     GetField {
         dst: Reg,
         obj: Reg,
-        field: FieldIdx,
+        name: ConstIdx,
     },
     SetField {
         obj: Reg,
-        field: FieldIdx,
+        name: ConstIdx,
         src: Reg,
     },
     GetIndex {

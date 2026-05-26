@@ -89,3 +89,87 @@ fn nested_lambda_capture_chain() {
         Value::Int(15),
     );
 }
+
+#[test]
+fn tuple_literal() {
+    use std::rc::Rc;
+    assert_eq!(
+        r("(1, 2, 3)"),
+        Value::Tuple(Rc::new(vec![Value::Int(1), Value::Int(2), Value::Int(3)])),
+    );
+}
+
+#[test]
+fn series_literal() {
+    use std::rc::Rc;
+    assert_eq!(
+        r("[1, 2, 3]"),
+        Value::Series(Rc::new(vec![Value::Int(1), Value::Int(2), Value::Int(3)])),
+    );
+}
+
+#[test]
+fn record_literal_and_field_access() {
+    let src = "let p = { x = 1, y = 2 }\np.x + p.y";
+    assert_eq!(r(src), Value::Int(3));
+}
+
+#[test]
+fn record_then_function() {
+    let src = "let project p = p.x\nproject { x = 7, y = 8 }";
+    assert_eq!(r(src), Value::Int(7));
+}
+
+#[test]
+fn none_constructor() {
+    use std::rc::Rc;
+    use vela_vm::ConsValue;
+    assert_eq!(
+        r("None"),
+        Value::Cons(Rc::new(ConsValue {
+            name: "None".into(),
+            args: vec![],
+        })),
+    );
+}
+
+#[test]
+fn some_constructor_applied() {
+    use std::rc::Rc;
+    use vela_vm::ConsValue;
+    assert_eq!(
+        r("Some 42"),
+        Value::Cons(Rc::new(ConsValue {
+            name: "Some".into(),
+            args: vec![Value::Int(42)],
+        })),
+    );
+}
+
+#[test]
+fn ok_constructor_through_let() {
+    use std::rc::Rc;
+    use vela_vm::ConsValue;
+    let src = "let x = Ok 7\nx";
+    assert_eq!(
+        r(src),
+        Value::Cons(Rc::new(ConsValue {
+            name: "Ok".into(),
+            args: vec![Value::Int(7)],
+        })),
+    );
+}
+
+#[test]
+fn constructor_passed_to_function() {
+    use std::rc::Rc;
+    use vela_vm::ConsValue;
+    let src = "let id x = x\nid (Err \"bad\")";
+    assert_eq!(
+        r(src),
+        Value::Cons(Rc::new(ConsValue {
+            name: "Err".into(),
+            args: vec![Value::Str("bad".into())],
+        })),
+    );
+}

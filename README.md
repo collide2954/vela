@@ -12,14 +12,33 @@ The full language specification lives in [SPEC.md](SPEC.md).
 
 ## Status
 
-Pre-alpha. In place: lexer, parser, type checker (Hindley-Milner with
-let polymorphism, user types, Option/Result, row-polymorphic records,
-nominal records, pattern matching with guards, nested exhaustiveness,
-shadowing warnings), and a tree-walking interpreter that runs the
-constructs the checker accepts. `vela run`, `vela check`, and
-`vela test` work end to end. The standard library is a small prelude;
-the formatter and package tooling are still to come. Nothing here is
-stable.
+Pre-alpha. Nothing here is stable.
+
+In place:
+
+- Lexer, parser, type checker (Hindley-Milner with let polymorphism,
+  user types, Option/Result, row-polymorphic records, nominal records,
+  pattern matching with guards, nested exhaustiveness, shadowing
+  warnings).
+- Tree-walking interpreter covering everything the checker accepts.
+- Opinionated formatter (`vela fmt`).
+- Project scaffolder (`vela new`, `vela new --lib`).
+- Stateful REPL.
+- Bytecode IR, AST→bytecode compiler, and register-based bytecode VM
+  for a growing subset of the language (literals, arithmetic, let,
+  if, lambdas, currying, closures with upvalue capture, tuples,
+  series, records with field access, constructors). The bytecode
+  pipeline is the runtime the project will ship; the tree-walker is
+  the reference implementation.
+
+Still to come (roughly in order): pattern matching and `?` lowered
+into bytecode, prelude builtins in the VM, the Cranelift JIT
+(`vela-jit`), a working `vela build`, language server, doc
+generator, package resolver, notebook UI. The runtime architecture
+plan is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+Working CLI subcommands today: `vela run`, `vela check`, `vela test`,
+`vela fmt`, `vela new`, `vela explain`, and a bare `vela` REPL.
 
 ## A taste
 
@@ -101,15 +120,26 @@ tests =
 ## Layout
 
     crates/
-        vela-cli/      # the `vela` binary
-        vela-lexer/    # lexical analysis
-        vela-parser/   # syntactic analysis
-        vela-check/    # type checking and inference
-        vela-eval/     # tree-walking interpreter
-        vela-diag/     # diagnostic rendering with spans
+        vela-cli/       # the `vela` binary; dispatches subcommands
+        vela-lexer/     # source bytes → tokens (indent-aware)
+        vela-parser/    # tokens → AST
+        vela-check/     # AST → typed AST + warnings
+        vela-eval/      # tree-walking interpreter (reference runtime)
+        vela-fmt/       # AST → canonical source text
+        vela-diag/      # diagnostic data type + rustc-style rendering
+        vela-pkg/       # vela.toml manifests, project scaffolding
+        vela-repl/      # interactive read-eval-print loop
+        vela-bytecode/  # register-based IR
+        vela-compile/   # typed AST → vela-bytecode
+        vela-vm/        # bytecode interpreter (baseline runtime tier)
 
-The standard library will live under `std/` once the bootstrap compiler
-can run it.
+    docs/
+        ARCHITECTURE.md # implementation notes: pipeline, JIT plan,
+                        # distribution model, Vela/Rust interop
+
+The standard library will live under `std/` once the bootstrap
+compiler can run it. The Cranelift-based `vela-jit` crate is planned
+but not yet present.
 
 ## Building
 

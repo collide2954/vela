@@ -246,6 +246,10 @@ impl Ctx {
             Expr::Lambda(params, body) => self.compile_lambda_chain(params, body),
             Expr::App(f, x) => self.app(f, x),
             Expr::Block { stmts, trailing } => self.block(stmts, trailing.as_deref()),
+            Expr::Tuple(elems) => self.make_seq(elems, false),
+            Expr::Series(elems) => self.make_seq(elems, true),
+            Expr::Record(fields) => self.make_record(fields),
+            Expr::Field(target, name) => self.field_access(target, name),
             other => Err(CompileError::new(format!(
                 "compiler does not yet handle expr: {other:?}"
             ))),
@@ -260,7 +264,13 @@ impl Ctx {
                 self.cur().emit(Op::GetUpval { dst, idx });
                 Ok(dst)
             }
-            None => Err(CompileError::new(format!("unbound name: {name}"))),
+            None => {
+                let kidx = self.cur().intern(Const::GlobalName(name.to_string()));
+                let cur = self.cur();
+                let dst = cur.alloc();
+                cur.emit(Op::GetGlobal { dst, name: kidx });
+                Ok(dst)
+            }
         }
     }
 
@@ -413,6 +423,64 @@ impl Ctx {
             cur.emit(Op::Return { src: dst });
         }
         Ok(self.finish_frame())
+    }
+
+    fn make_seq(&mut self, elems: &[Expr], series: bool) -> Result<Reg, CompileError> {
+        let n = elems.len() as u16;
+        let mut regs = Vec::with_capacity(elems.len());
+        for e in elems {
+            regs.push(self.expr(e)?);
+        }
+        let cur = self.cur();
+        let base = cur.next_reg;
+        for r in &regs {
+            let slot = cur.alloc();
+            cur.emit(Op::Move { dst: slot, src: *r });
+        }
+        let dst = cur.alloc();
+        cur.emit(if series {
+            Op::MkSeries { dst, base, n }
+        } else {
+            Op::MkTuple { dst, base, n }
+        });
+        Ok(dst)
+    }
+
+    fn make_record(&mut self, fields: &[(String, Expr)]) -> Result<Reg, CompileError> {
+        let names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+        let names_idx = self.cur().intern(Const::FieldNames(names));
+        let n = fields.len() as u16;
+        let mut value_regs = Vec::with_capacity(fields.len());
+        for (_, e) in fields {
+            value_regs.push(self.expr(e)?);
+        }
+        let cur = self.cur();
+        let base = cur.next_reg;
+        for r in &value_regs {
+            let slot = cur.alloc();
+            cur.emit(Op::Move { dst: slot, src: *r });
+        }
+        let dst = cur.alloc();
+        cur.emit(Op::MkRecord {
+            dst,
+            base,
+            n,
+            names: names_idx,
+        });
+        Ok(dst)
+    }
+
+    fn field_access(&mut self, target: &Expr, name: &str) -> Result<Reg, CompileError> {
+        let obj = self.expr(target)?;
+        let name_idx = self.cur().intern(Const::FieldName(name.to_string()));
+        let cur = self.cur();
+        let dst = cur.alloc();
+        cur.emit(Op::GetField {
+            dst,
+            obj,
+            name: name_idx,
+        });
+        Ok(dst)
     }
 
     fn app(&mut self, f: &Expr, arg: &Expr) -> Result<Reg, CompileError> {
