@@ -645,8 +645,18 @@ fn eval_stmt(stmt: &Stmt, env: &mut Env) -> Result<Value, RuntimeError> {
             }
         }
         Stmt::Expr(e) => eval(e, env),
+        Stmt::Impl(block) => {
+            for method in &block.methods {
+                let value = if method.params.is_empty() {
+                    eval(&method.body, env)?
+                } else {
+                    make_closure(&method.params, &method.body, env)
+                };
+                *env = env.extend(method.name.clone(), value);
+            }
+            Ok(Value::Unit)
+        }
         Stmt::TraitDecl(_)
-        | Stmt::Impl(_)
         | Stmt::Tests(_)
         | Stmt::Extern { .. }
         | Stmt::Import { .. }
