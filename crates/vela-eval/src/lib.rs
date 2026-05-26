@@ -131,6 +131,32 @@ pub fn run(src: &str) -> Result<Value, RuntimeError> {
     Ok(last)
 }
 
+pub struct Session {
+    env: Env,
+}
+
+impl Session {
+    pub fn new() -> Self {
+        Self { env: prelude() }
+    }
+
+    pub fn eval_str(&mut self, src: &str) -> Result<Value, RuntimeError> {
+        let program = parse_program(src)
+            .map_err(|e| RuntimeError::new(format!("parse error: {}", e.message)))?;
+        let mut last = Value::Unit;
+        for stmt in &program.stmts {
+            last = eval_stmt(stmt, &mut self.env)?;
+        }
+        Ok(last)
+    }
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TestReport {
     pub name: String,

@@ -7,17 +7,7 @@ use vela_diag::Diagnostic;
 fn main() -> ExitCode {
     let args: Vec<String> = env::args().collect();
     let Some(cmd) = args.get(1) else {
-        println!("vela {}", env!("CARGO_PKG_VERSION"));
-        println!();
-        println!("usage: vela <subcommand> [args]");
-        println!("subcommands:");
-        println!("  run FILE        execute a .vela file");
-        println!("  check FILE      type-check a single .vela file");
-        println!("  test FILE       run tests in a .vela file");
-        println!("  fmt FILE...     format files in place");
-        println!("  fmt --check     check formatting without modifying");
-        println!("  explain CODE    show the long form of a diagnostic");
-        return ExitCode::SUCCESS;
+        return repl();
     };
 
     match cmd.as_str() {
@@ -284,4 +274,8 @@ fn fmt_cmd(args: &[String]) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+fn repl() -> ExitCode {
+    ExitCode::from(vela_repl::run() as u8)
 }

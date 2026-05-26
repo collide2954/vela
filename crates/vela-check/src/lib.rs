@@ -484,6 +484,39 @@ pub fn check_program_with_warnings(src: &str) -> Result<(Type, Vec<Warning>), Ty
     Ok((resolved, ctx.warnings))
 }
 
+pub struct Session {
+    env: Env,
+    ctx: Ctx,
+}
+
+impl Session {
+    pub fn new() -> Self {
+        let mut ctx = Ctx::default();
+        let env = prelude(&mut ctx);
+        Self { env, ctx }
+    }
+
+    pub fn check_str(&mut self, src: &str) -> Result<(Type, Vec<Warning>), TypeError> {
+        let program = parse_program(src)
+            .map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
+        self.ctx.warnings.clear();
+        let mut last = Type::Unit;
+        for stmt in &program.stmts {
+            last = check_stmt(stmt, &mut self.env, &mut self.ctx)?;
+        }
+        Ok((
+            self.ctx.resolve(&last),
+            std::mem::take(&mut self.ctx.warnings),
+        ))
+    }
+}
+
+impl Default for Session {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn prelude(ctx: &mut Ctx) -> Env {
     let mut env = Env::new();
 
