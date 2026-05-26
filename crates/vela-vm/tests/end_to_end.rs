@@ -58,3 +58,34 @@ fn unary_neg_and_not() {
 fn string_concat() {
     assert_eq!(r(r#""ab" ++ "cd""#), Value::Str("abcd".into()));
 }
+
+#[test]
+fn lambda_application() {
+    assert_eq!(r("(fn x -> x + 1) 5"), Value::Int(6));
+}
+
+#[test]
+fn named_function_one_arg() {
+    assert_eq!(r("let inc x = x + 1\ninc 41"), Value::Int(42));
+}
+
+#[test]
+fn curried_function_two_args() {
+    assert_eq!(r("let add x y = x + y\nadd 3 4"), Value::Int(7));
+}
+
+#[test]
+fn closure_captures_outer_local() {
+    assert_eq!(
+        r("let n = 10\nlet add_n x = x + n\nadd_n 5"),
+        Value::Int(15),
+    );
+}
+
+#[test]
+fn nested_lambda_capture_chain() {
+    assert_eq!(
+        r("let make_adder x = fn y -> x + y\nlet add5 = make_adder 5\nadd5 10"),
+        Value::Int(15),
+    );
+}

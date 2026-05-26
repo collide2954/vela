@@ -1,11 +1,12 @@
 //! Register-based bytecode VM for the Vela runtime.
 //!
-//! The VM is the *baseline tier*: it handles every construct the
+//! The VM is the baseline tier: it handles every construct the
 //! compiler emits. Hot functions will later be lifted into native code
-//! by `vela-jit`; the JIT path returns to this VM at instruction
+//! by `vela-jit`; the JIT path returns to the VM at instruction
 //! boundaries on bailout. See `docs/ARCHITECTURE.md`.
 
-use vela_bytecode::{Const, Function, Module, Op, Reg};
+use std::rc::Rc;
+use vela_bytecode::{Const, FunctionId, Module, Op, Reg};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -18,6 +19,13 @@ pub enum Value {
     Bool(bool),
     Sym(String),
     Unit,
+    Closure(Rc<Closure>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Closure {
+    pub function: FunctionId,
+    pub upvalues: Vec<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,13 +43,14 @@ pub fn run(module: &Module) -> Result<Value, RuntimeError> {
     let entry = module
         .entry
         .ok_or_else(|| RuntimeError::new("module has no entry function"))?;
-    run_function(module, entry, &[])
+    exec(module, entry, &[], &[])
 }
 
-pub fn run_function(
+fn exec(
     module: &Module,
-    fid: vela_bytecode::FunctionId,
+    fid: FunctionId,
     args: &[Value],
+    upvalues: &[Value],
 ) -> Result<Value, RuntimeError> {
     let f = module.function(fid);
     if args.len() != f.arity as usize {
@@ -52,14 +61,11 @@ pub fn run_function(
             args.len()
         )));
     }
-    let mut regs: Vec<Value> = vec![Value::Unit; f.n_regs as usize];
+    let n_regs = f.n_regs.max(f.arity) as usize;
+    let mut regs: Vec<Value> = vec![Value::Unit; n_regs.max(1)];
     for (i, v) in args.iter().enumerate() {
         regs[i] = v.clone();
     }
-    exec(f, &mut regs)
-}
-
-fn exec(f: &Function, regs: &mut [Value]) -> Result<Value, RuntimeError> {
     let mut pc: usize = 0;
     loop {
         let op = f
@@ -74,19 +80,19 @@ fn exec(f: &Function, regs: &mut [Value]) -> Result<Value, RuntimeError> {
                 regs[*dst as usize] = regs[*src as usize].clone();
             }
             Op::Add { dst, a, b } => {
-                num_binop(regs, *dst, *a, *b, "+", |x, y| x + y, |x, y| x + y)?
+                num_binop(&mut regs, *dst, *a, *b, "+", |x, y| x + y, |x, y| x + y)?;
             }
             Op::Sub { dst, a, b } => {
-                num_binop(regs, *dst, *a, *b, "-", |x, y| x - y, |x, y| x - y)?
+                num_binop(&mut regs, *dst, *a, *b, "-", |x, y| x - y, |x, y| x - y)?;
             }
             Op::Mul { dst, a, b } => {
-                num_binop(regs, *dst, *a, *b, "*", |x, y| x * y, |x, y| x * y)?
+                num_binop(&mut regs, *dst, *a, *b, "*", |x, y| x * y, |x, y| x * y)?;
             }
             Op::Div { dst, a, b } => {
-                num_binop(regs, *dst, *a, *b, "/", |x, y| x / y, |x, y| x / y)?
+                num_binop(&mut regs, *dst, *a, *b, "/", |x, y| x / y, |x, y| x / y)?;
             }
             Op::Mod { dst, a, b } => {
-                num_binop(regs, *dst, *a, *b, "%", |x, y| x % y, |x, y| x % y)?
+                num_binop(&mut regs, *dst, *a, *b, "%", |x, y| x % y, |x, y| x % y)?;
             }
             Op::Pow { dst, a, b } => match (regs[*a as usize].clone(), regs[*b as usize].clone()) {
                 (Value::Int(x), Value::Int(y)) if y >= 0 => {
@@ -109,10 +115,18 @@ fn exec(f: &Function, regs: &mut [Value]) -> Result<Value, RuntimeError> {
             Op::Ne { dst, a, b } => {
                 regs[*dst as usize] = Value::Bool(regs[*a as usize] != regs[*b as usize]);
             }
-            Op::Lt { dst, a, b } => cmp(regs, *dst, *a, *b, |o| o == std::cmp::Ordering::Less)?,
-            Op::Le { dst, a, b } => cmp(regs, *dst, *a, *b, |o| o != std::cmp::Ordering::Greater)?,
-            Op::Gt { dst, a, b } => cmp(regs, *dst, *a, *b, |o| o == std::cmp::Ordering::Greater)?,
-            Op::Ge { dst, a, b } => cmp(regs, *dst, *a, *b, |o| o != std::cmp::Ordering::Less)?,
+            Op::Lt { dst, a, b } => {
+                cmp(&mut regs, *dst, *a, *b, |o| o == std::cmp::Ordering::Less)?
+            }
+            Op::Le { dst, a, b } => cmp(&mut regs, *dst, *a, *b, |o| {
+                o != std::cmp::Ordering::Greater
+            })?,
+            Op::Gt { dst, a, b } => cmp(&mut regs, *dst, *a, *b, |o| {
+                o == std::cmp::Ordering::Greater
+            })?,
+            Op::Ge { dst, a, b } => {
+                cmp(&mut regs, *dst, *a, *b, |o| o != std::cmp::Ordering::Less)?
+            }
             Op::Neg { dst, a } => match regs[*a as usize].clone() {
                 Value::Int(n) => regs[*dst as usize] = Value::Int(-n),
                 Value::Float(n) => regs[*dst as usize] = Value::Float(-n),
@@ -138,12 +152,45 @@ fn exec(f: &Function, regs: &mut [Value]) -> Result<Value, RuntimeError> {
                 if go {
                     pc = ((pc as i32) + 1 + offset) as usize;
                     continue;
-                } else {
-                    pc += 1;
-                    continue;
                 }
             }
             Op::Return { src } => return Ok(regs[*src as usize].clone()),
+            Op::MkClosure {
+                dst,
+                function,
+                n_upvals: _,
+            } => {
+                let descs = &module.function(*function).upvals;
+                let mut caps = Vec::with_capacity(descs.len());
+                for d in descs {
+                    if d.from_parent_local {
+                        caps.push(regs[d.index as usize].clone());
+                    } else {
+                        caps.push(upvalues[d.index as usize].clone());
+                    }
+                }
+                regs[*dst as usize] = Value::Closure(Rc::new(Closure {
+                    function: *function,
+                    upvalues: caps,
+                }));
+            }
+            Op::GetUpval { dst, idx } => {
+                regs[*dst as usize] = upvalues[*idx as usize].clone();
+            }
+            Op::Call {
+                dst,
+                callee,
+                base,
+                nargs,
+            } => {
+                let f_v = regs[*callee as usize].clone();
+                let mut a = Vec::with_capacity(*nargs as usize);
+                for i in 0..*nargs {
+                    a.push(regs[(*base + i) as usize].clone());
+                }
+                let result = call_value(module, &f_v, &a)?;
+                regs[*dst as usize] = result;
+            }
             other => {
                 return Err(RuntimeError::new(format!(
                     "VM does not yet handle: {other:?}"
@@ -151,6 +198,13 @@ fn exec(f: &Function, regs: &mut [Value]) -> Result<Value, RuntimeError> {
             }
         }
         pc += 1;
+    }
+}
+
+fn call_value(module: &Module, f: &Value, args: &[Value]) -> Result<Value, RuntimeError> {
+    match f {
+        Value::Closure(c) => exec(module, c.function, args, &c.upvalues),
+        other => Err(RuntimeError::new(format!("not callable: {other:?}"))),
     }
 }
 

@@ -1,11 +1,10 @@
 //! Compile a Vela AST into `vela-bytecode` IR.
 //!
-//! The compiler is intentionally small and grows alongside the VM:
-//! every construct that compiles here is one the VM can execute. See
-//! `docs/ARCHITECTURE.md` for the larger plan.
+//! The compiler grows alongside the VM: every construct that compiles
+//! here is one the VM can execute. See `docs/ARCHITECTURE.md`.
 
-use vela_bytecode::{Const, ConstIdx, Function, Module, Op, Reg};
-use vela_parser::{BinOp, Expr, Lit, Program, Stmt, UnOp, parse_program};
+use vela_bytecode::{Const, ConstIdx, Function, FunctionId, Module, Op, Reg, UpvalDesc, UpvalIdx};
+use vela_parser::{BinOp, Expr, Lit, Param, Pat, Program, Stmt, UnOp, parse_program};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompileError {
@@ -25,34 +24,36 @@ pub fn compile_source(src: &str) -> Result<Module, CompileError> {
 }
 
 pub fn compile_program(program: &Program) -> Result<Module, CompileError> {
-    let mut fb = FnBuilder::new("main", 0);
+    let mut ctx = Ctx::new();
+    ctx.push_frame("main", 0);
     for (i, stmt) in program.stmts.iter().enumerate() {
         let last = i == program.stmts.len() - 1;
-        fb.stmt(stmt, last)?;
+        ctx.stmt(stmt, last)?;
     }
-    if !matches!(fb.func.code.last(), Some(Op::Return { .. })) {
-        let unit = fb.intern(Const::Unit);
-        let r = fb.alloc();
-        fb.emit(Op::LoadConst { dst: r, k: unit });
-        fb.emit(Op::Return { src: r });
-    }
-    let func = fb.finish();
-    Ok(Module {
-        functions: vec![func],
-        entry: Some(0),
-    })
+    ctx.ensure_return();
+    let main_id = ctx.finish_frame();
+    let mut module = ctx.into_module();
+    module.entry = Some(main_id);
+    Ok(module)
 }
 
-struct FnBuilder {
+#[derive(Debug, Clone)]
+struct Local {
+    name: String,
+    reg: Reg,
+}
+
+#[derive(Debug)]
+struct Frame {
     func: Function,
-    locals: Vec<(String, Reg)>,
+    locals: Vec<Local>,
     next_reg: Reg,
     max_reg: Reg,
 }
 
-impl FnBuilder {
+impl Frame {
     fn new(name: &str, arity: u16) -> Self {
-        Self {
+        Frame {
             func: Function {
                 name: name.into(),
                 arity,
@@ -70,9 +71,13 @@ impl FnBuilder {
         }
     }
 
-    fn finish(mut self) -> Function {
-        self.func.n_regs = self.max_reg;
-        self.func
+    fn alloc(&mut self) -> Reg {
+        let r = self.next_reg;
+        self.next_reg += 1;
+        if self.next_reg > self.max_reg {
+            self.max_reg = self.next_reg;
+        }
+        r
     }
 
     fn intern(&mut self, k: Const) -> ConstIdx {
@@ -88,21 +93,114 @@ impl FnBuilder {
         self.func.code.push(op);
     }
 
-    fn alloc(&mut self) -> Reg {
-        let r = self.next_reg;
-        self.next_reg += 1;
-        if self.next_reg > self.max_reg {
-            self.max_reg = self.next_reg;
+    fn pc(&self) -> usize {
+        self.func.code.len()
+    }
+}
+
+#[derive(Debug)]
+struct Ctx {
+    frames: Vec<Frame>,
+    finished: Vec<Function>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Resolved {
+    Local(Reg),
+    Upval(UpvalIdx),
+}
+
+impl Ctx {
+    fn new() -> Self {
+        Self {
+            frames: Vec::new(),
+            finished: Vec::new(),
         }
-        r
     }
 
-    fn resolve_local(&self, name: &str) -> Option<Reg> {
-        self.locals
+    fn push_frame(&mut self, name: &str, arity: u16) {
+        self.frames.push(Frame::new(name, arity));
+    }
+
+    fn finish_frame(&mut self) -> FunctionId {
+        let mut frame = self.frames.pop().expect("no frame to finish");
+        frame.func.n_regs = frame.max_reg;
+        frame.func.n_upvals = frame.func.upvals.len() as u16;
+        let id = self.finished.len() as FunctionId;
+        self.finished.push(frame.func);
+        id
+    }
+
+    fn into_module(self) -> Module {
+        Module {
+            functions: self.finished,
+            entry: None,
+        }
+    }
+
+    fn cur(&mut self) -> &mut Frame {
+        self.frames.last_mut().expect("no frame")
+    }
+
+    fn ensure_return(&mut self) {
+        let cur = self.cur();
+        if !matches!(cur.func.code.last(), Some(Op::Return { .. })) {
+            let unit = cur.intern(Const::Unit);
+            let r = cur.alloc();
+            cur.emit(Op::LoadConst { dst: r, k: unit });
+            cur.emit(Op::Return { src: r });
+        }
+    }
+
+    fn resolve(&mut self, name: &str) -> Option<Resolved> {
+        let top = self.frames.len() - 1;
+        if let Some(r) = self.frames[top]
+            .locals
             .iter()
             .rev()
-            .find(|(n, _)| n == name)
-            .map(|(_, r)| *r)
+            .find(|l| l.name == name)
+            .map(|l| l.reg)
+        {
+            return Some(Resolved::Local(r));
+        }
+        self.resolve_upval(name, top).map(Resolved::Upval)
+    }
+
+    fn resolve_upval(&mut self, name: &str, level: usize) -> Option<UpvalIdx> {
+        if level == 0 {
+            return None;
+        }
+        let parent = level - 1;
+        if let Some(parent_local) = self.frames[parent]
+            .locals
+            .iter()
+            .rev()
+            .find(|l| l.name == name)
+            .map(|l| l.reg)
+        {
+            return Some(self.add_upval(level, name, true, parent_local));
+        }
+        if let Some(parent_upval) = self.resolve_upval(name, parent) {
+            return Some(self.add_upval(level, name, false, parent_upval));
+        }
+        None
+    }
+
+    fn add_upval(&mut self, level: usize, _name: &str, from_local: bool, index: u16) -> UpvalIdx {
+        let func = &mut self.frames[level].func;
+        if let Some(i) = func
+            .upvals
+            .iter()
+            .position(|u| u.from_parent_local == from_local && u.index == index)
+        {
+            return i as UpvalIdx;
+        }
+        let i = func.upvals.len() as UpvalIdx;
+        func.upvals.push(UpvalDesc {
+            from_parent_local: from_local,
+            index,
+        });
+        i
     }
 
     fn stmt(&mut self, s: &Stmt, is_last: bool) -> Result<(), CompileError> {
@@ -113,15 +211,22 @@ impl FnBuilder {
                 body,
                 recursive: _,
                 return_ty: _,
-            } if params.is_empty() => {
-                let r = self.expr(body)?;
-                self.locals.push((name.clone(), r));
+            } => {
+                let r = if params.is_empty() {
+                    self.expr(body)?
+                } else {
+                    self.compile_lambda_chain(params, body)?
+                };
+                self.cur().locals.push(Local {
+                    name: name.clone(),
+                    reg: r,
+                });
                 Ok(())
             }
             Stmt::Expr(e) => {
                 let r = self.expr(e)?;
                 if is_last {
-                    self.emit(Op::Return { src: r });
+                    self.cur().emit(Op::Return { src: r });
                 }
                 Ok(())
             }
@@ -134,16 +239,28 @@ impl FnBuilder {
     fn expr(&mut self, e: &Expr) -> Result<Reg, CompileError> {
         match e {
             Expr::Lit(l) => self.lit(l),
-            Expr::Var(name) => match self.resolve_local(name) {
-                Some(r) => Ok(r),
-                None => Err(CompileError::new(format!("unbound name: {name}"))),
-            },
+            Expr::Var(name) => self.var(name),
             Expr::BinOp(op, l, r) => self.binop(*op, l, r),
             Expr::UnaryOp(op, inner) => self.unop(*op, inner),
             Expr::If(c, t, e) => self.if_expr(c, t, e),
+            Expr::Lambda(params, body) => self.compile_lambda_chain(params, body),
+            Expr::App(f, x) => self.app(f, x),
+            Expr::Block { stmts, trailing } => self.block(stmts, trailing.as_deref()),
             other => Err(CompileError::new(format!(
                 "compiler does not yet handle expr: {other:?}"
             ))),
+        }
+    }
+
+    fn var(&mut self, name: &str) -> Result<Reg, CompileError> {
+        match self.resolve(name) {
+            Some(Resolved::Local(r)) => Ok(r),
+            Some(Resolved::Upval(idx)) => {
+                let dst = self.cur().alloc();
+                self.cur().emit(Op::GetUpval { dst, idx });
+                Ok(dst)
+            }
+            None => Err(CompileError::new(format!("unbound name: {name}"))),
         }
     }
 
@@ -158,17 +275,19 @@ impl FnBuilder {
             Lit::Bool(b) => Const::Bool(*b),
             Lit::Unit => Const::Unit,
         };
-        let kidx = self.intern(k);
-        let dst = self.alloc();
-        self.emit(Op::LoadConst { dst, k: kidx });
+        let cur = self.cur();
+        let kidx = cur.intern(k);
+        let dst = cur.alloc();
+        cur.emit(Op::LoadConst { dst, k: kidx });
         Ok(dst)
     }
 
     fn binop(&mut self, op: BinOp, l: &Expr, r: &Expr) -> Result<Reg, CompileError> {
         let a = self.expr(l)?;
         let b = self.expr(r)?;
-        let dst = self.alloc();
-        let op = match op {
+        let cur = self.cur();
+        let dst = cur.alloc();
+        let emit = match op {
             BinOp::Add => Op::Add { dst, a, b },
             BinOp::Sub => Op::Sub { dst, a, b },
             BinOp::Mul => Op::Mul { dst, a, b },
@@ -188,40 +307,130 @@ impl FnBuilder {
                 )));
             }
         };
-        self.emit(op);
+        cur.emit(emit);
         Ok(dst)
     }
 
     fn unop(&mut self, op: UnOp, inner: &Expr) -> Result<Reg, CompileError> {
         let a = self.expr(inner)?;
-        let dst = self.alloc();
-        let op = match op {
+        let cur = self.cur();
+        let dst = cur.alloc();
+        let emit = match op {
             UnOp::Neg => Op::Neg { dst, a },
             UnOp::Not => Op::Not { dst, a },
         };
-        self.emit(op);
+        cur.emit(emit);
         Ok(dst)
     }
 
     fn if_expr(&mut self, c: &Expr, t: &Expr, e: &Expr) -> Result<Reg, CompileError> {
         let cond = self.expr(c)?;
-        let jf_idx = self.func.code.len();
-        self.emit(Op::JumpIfFalse { cond, offset: 0 });
-        let dst = self.alloc();
+        let jf_idx = self.cur().pc();
+        self.cur().emit(Op::JumpIfFalse { cond, offset: 0 });
+        let dst = self.cur().alloc();
         let t_val = self.expr(t)?;
-        self.emit(Op::Move { dst, src: t_val });
-        let jmp_idx = self.func.code.len();
-        self.emit(Op::Jump { offset: 0 });
-        let else_pc = self.func.code.len() as i32;
+        self.cur().emit(Op::Move { dst, src: t_val });
+        let jmp_idx = self.cur().pc();
+        self.cur().emit(Op::Jump { offset: 0 });
+        let else_pc = self.cur().pc() as i32;
         let e_val = self.expr(e)?;
-        self.emit(Op::Move { dst, src: e_val });
-        let end_pc = self.func.code.len() as i32;
-        if let Op::JumpIfFalse { offset, .. } = &mut self.func.code[jf_idx] {
+        self.cur().emit(Op::Move { dst, src: e_val });
+        let end_pc = self.cur().pc() as i32;
+        let cur = self.cur();
+        if let Op::JumpIfFalse { offset, .. } = &mut cur.func.code[jf_idx] {
             *offset = else_pc - jf_idx as i32 - 1;
         }
-        if let Op::Jump { offset } = &mut self.func.code[jmp_idx] {
+        if let Op::Jump { offset } = &mut cur.func.code[jmp_idx] {
             *offset = end_pc - jmp_idx as i32 - 1;
         }
+        Ok(dst)
+    }
+
+    fn block(&mut self, stmts: &[Stmt], trailing: Option<&Expr>) -> Result<Reg, CompileError> {
+        for s in stmts {
+            self.stmt(s, false)?;
+        }
+        if let Some(t) = trailing {
+            self.expr(t)
+        } else {
+            let cur = self.cur();
+            let k = cur.intern(Const::Unit);
+            let dst = cur.alloc();
+            cur.emit(Op::LoadConst { dst, k });
+            Ok(dst)
+        }
+    }
+
+    fn compile_lambda_chain(&mut self, params: &[Param], body: &Expr) -> Result<Reg, CompileError> {
+        if params.is_empty() {
+            return Err(CompileError::new("lambda needs at least one parameter"));
+        }
+        let fid = self.compile_lambda_inner(params, body, "lambda")?;
+        let n_upvals = self.finished[fid as usize].upvals.len() as u16;
+        let cur = self.cur();
+        let dst = cur.alloc();
+        cur.emit(Op::MkClosure {
+            dst,
+            function: fid,
+            n_upvals,
+        });
+        Ok(dst)
+    }
+
+    fn compile_lambda_inner(
+        &mut self,
+        params: &[Param],
+        body: &Expr,
+        name: &str,
+    ) -> Result<FunctionId, CompileError> {
+        let head = &params[0];
+        let param_name = match &head.pat {
+            Pat::Var(n) => n.clone(),
+            other => {
+                return Err(CompileError::new(format!(
+                    "compiler does not yet handle pattern parameter: {other:?}"
+                )));
+            }
+        };
+        self.push_frame(name, 1);
+        self.cur().locals.push(Local {
+            name: param_name,
+            reg: 0,
+        });
+        if params.len() == 1 {
+            let r = self.expr(body)?;
+            self.cur().emit(Op::Return { src: r });
+        } else {
+            let inner_fid = self.compile_lambda_inner(&params[1..], body, "lambda")?;
+            let n_upvals = self.finished[inner_fid as usize].upvals.len() as u16;
+            let cur = self.cur();
+            let dst = cur.alloc();
+            cur.emit(Op::MkClosure {
+                dst,
+                function: inner_fid,
+                n_upvals,
+            });
+            cur.emit(Op::Return { src: dst });
+        }
+        Ok(self.finish_frame())
+    }
+
+    fn app(&mut self, f: &Expr, arg: &Expr) -> Result<Reg, CompileError> {
+        let callee = self.expr(f)?;
+        let arg_v = self.expr(arg)?;
+        let cur = self.cur();
+        let base = cur.alloc();
+        cur.emit(Op::Move {
+            dst: base,
+            src: arg_v,
+        });
+        let dst = cur.alloc();
+        cur.emit(Op::Call {
+            dst,
+            callee,
+            base,
+            nargs: 1,
+        });
         Ok(dst)
     }
 }

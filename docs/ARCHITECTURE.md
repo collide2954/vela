@@ -175,6 +175,24 @@ follow for the runtime:
 3. **No timing-dependent dispatch.** The JIT trigger is based on a
    counter (deterministic), not wall-clock time.
 
+### Distribution: what `vela build` produces
+
+`vela build` produces a single native executable (planned location:
+`target/<package-name>`). The executable bundles:
+
+- the program's compiled bytecode chunks,
+- the VM that interprets them,
+- the JIT (when enabled at build time), and
+- the runtime (GC, prelude intrinsics).
+
+The end user runs it like any native binary. They do not need the
+`vela` toolchain installed. This is the same distribution model as a
+`cargo build --release` Rust binary: one file, no external runtime
+required.
+
+`vela build --no-jit` produces a binary that ships only the VM tier;
+it is slower on hot loops but smaller and has no Cranelift dependency.
+
 ### Mixed Vela/Rust packages
 
 `SPEC.md` §14 allows a package to contain a `rust/` subdirectory with
@@ -194,6 +212,40 @@ The contract:
   sequence as the VM dispatch path does.
 - Vela values that cross the boundary are passed through marshallers
   the compiler emits once and both tiers reuse.
+
+### Consuming a mixed-language library
+
+A library author publishes a package whose layout is
+`src/lib.vela` + `rust/Cargo.toml`. A consumer adds it to their own
+`vela.toml`:
+
+    [deps]
+    lib_x = { git = "...", tag = "v1.0.0" }
+
+When the consumer runs `vela build`:
+
+1. `vela.lock` records `lib_x`'s content hash, the same way any other
+   dep is pinned.
+2. `vela build` fetches `lib_x` into a cache and walks its layout,
+   detecting the `rust/` subdirectory.
+3. It synthesizes a Cargo workspace containing the consumer's
+   embedded bytecode, the VM/JIT/runtime crates, and `lib_x`'s Rust
+   crate. The user never sees this `Cargo.toml`.
+4. `cargo build` produces one native binary. `lib_x`'s `.vela` files
+   are present as bytecode chunks embedded in `.rodata`; `lib_x`'s
+   Rust code is linked in directly.
+5. At runtime, calls from `lib_x`'s Vela code to its own Rust
+   implementation (declared via `extern "C" =` on the Vela side)
+   resolve to symbols in the linked Rust crate via the vela-abi.
+   The consumer's Vela code can in turn call `lib_x`'s Vela API
+   without knowing or caring that some leaves are Rust.
+
+The Rust toolchain is required at *build time* on the consumer's
+machine — `cargo` is doing the link — but not at *runtime* on any
+end user's machine. A consumer who depends only on pure-Vela
+packages does not need `cargo` at all; `vela build` falls back to
+linking just the runtime crates, which the `vela` distribution
+already ships with.
 
 ### Tier and deopt strategy
 
