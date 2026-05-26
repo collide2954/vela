@@ -1007,13 +1007,7 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
         }
         Expr::BinOp(BinOp::Tilde, _, _) => Ok(Type::Formula),
         Expr::BinOp(op, lhs, rhs) => infer_binary(*op, lhs, rhs, env, ctx),
-        Expr::Lambda(params, body) => {
-            let params: Vec<vela_parser::Param> = params
-                .iter()
-                .map(|n| vela_parser::Param { pat: Pat::Var(n.clone()), ty: None })
-                .collect();
-            lambda_type(&params, body, env, ctx)
-        }
+        Expr::Lambda(params, body) => lambda_type(params, body, env, ctx),
         Expr::Block { stmts, trailing } => {
             let mut block_env = env.clone();
             for s in stmts {

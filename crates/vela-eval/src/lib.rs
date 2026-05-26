@@ -464,7 +464,7 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, RuntimeError> {
             .lookup(name)
             .ok_or_else(|| RuntimeError::new(format!("unbound: {name}"))),
         Expr::Lambda(params, body) => Ok(Value::Closure {
-            params: params.iter().map(|n| Pat::Var(n.clone())).collect(),
+            params: params.iter().map(|p| p.pat.clone()).collect(),
             body: (**body).clone(),
             env: env.clone(),
         }),

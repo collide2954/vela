@@ -144,3 +144,27 @@ fn boolean_and_or_not() {
     assert_eq!(r("true or false"), Value::Bool(true));
     assert_eq!(r("not true"), Value::Bool(false));
 }
+
+#[test]
+fn lambda_unit_param() {
+    let src = "let thunk = fn () -> 42\nthunk ()";
+    assert_eq!(r(src), Value::Int(42));
+}
+
+#[test]
+fn lambda_tuple_param() {
+    let src = "let fst = fn (a, b) -> a\nfst (3, 4)";
+    assert_eq!(r(src), Value::Int(3));
+}
+
+#[test]
+fn lambda_block_body() {
+    let src = "let f = fn x ->\n    let y = x + 1\n    y * 2\nf 3";
+    assert_eq!(r(src), Value::Int(8));
+}
+
+#[test]
+fn match_arm_block_body() {
+    let src = "let v = Some 3\nmatch v with\n| Some x ->\n    let y = x + 1\n    y * 2\n| None -> 0";
+    assert_eq!(r(src), Value::Int(8));
+}

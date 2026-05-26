@@ -145,7 +145,7 @@ pub enum Expr {
     UnaryOp(UnOp, Box<Expr>),
     Postfix(PostOp, Box<Expr>),
     App(Box<Expr>, Box<Expr>),
-    Lambda(Vec<String>, Box<Expr>),
+    Lambda(Vec<Param>, Box<Expr>),
     If(Box<Expr>, Box<Expr>, Box<Expr>),
     Match(Box<Expr>, Vec<MatchArm>),
     Record(Vec<(String, Expr)>),
@@ -285,12 +285,13 @@ struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     eof_offset: usize,
+    last_was_block: bool,
 }
 
 impl Parser {
     fn new(src: &str) -> Self {
         let tokens: Vec<Token> = lex(src).collect();
-        Self { tokens, pos: 0, eof_offset: src.len() }
+        Self { tokens, pos: 0, eof_offset: src.len(), last_was_block: false }
     }
 
     fn skip_newlines(&mut self) {
@@ -332,6 +333,7 @@ impl Parser {
     }
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
+        self.last_was_block = false;
         match self.peek() {
             Some(TokenKind::Keyword(Keyword::Let)) => {
                 self.bump();
@@ -926,7 +928,9 @@ impl Parser {
             self.bump();
             if matches!(self.peek(), Some(TokenKind::Indent)) {
                 self.bump();
-                return self.parse_block_contents();
+                let body = self.parse_block_contents()?;
+                self.last_was_block = true;
+                return Ok(body);
             }
             self.pos = save;
         }
@@ -1279,6 +1283,10 @@ impl Parser {
                 lhs = Expr::Postfix(op, Box::new(lhs));
                 continue;
             }
+            if self.last_was_block {
+                self.last_was_block = false;
+                break;
+            }
             if self.peek().is_some_and(starts_atom) && APP_BP >= min_bp {
                 let rhs = self.parse_expr_bp(APP_BP + 1)?;
                 lhs = Expr::App(Box::new(lhs), Box::new(rhs));
@@ -1309,11 +1317,38 @@ impl Parser {
             TokenKind::Sym(name) => Ok(Expr::Sym(name)),
             TokenKind::Keyword(Keyword::Fn) => {
                 let mut params = Vec::new();
-                while let Some(TokenKind::Ident(_)) = self.peek() {
-                    params.push(self.expect_ident()?);
+                loop {
+                    match self.peek() {
+                        Some(TokenKind::Ident(_)) => {
+                            let n = self.expect_ident()?;
+                            params.push(Param { pat: Pat::Var(n), ty: None });
+                        }
+                        Some(TokenKind::Punct(Punct::LParen)) => {
+                            let save = self.pos;
+                            self.bump();
+                            if let Some(p) = self.try_typed_param() {
+                                params.push(p);
+                            } else {
+                                self.pos = save;
+                                if let Some(p) = self.try_pattern_param() {
+                                    params.push(p);
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        Some(TokenKind::Punct(Punct::LBrace)) => {
+                            if let Some(p) = self.try_pattern_param() {
+                                params.push(p);
+                            } else {
+                                break;
+                            }
+                        }
+                        _ => break,
+                    }
                 }
                 self.expect(&TokenKind::Op(Op::RArrow))?;
-                let body = self.parse_expr_bp(0)?;
+                let body = self.parse_body_after_block_intro()?;
                 Ok(Expr::Lambda(params, Box::new(body)))
             }
             TokenKind::Keyword(Keyword::If) => {
@@ -1353,7 +1388,7 @@ impl Parser {
                         None
                     };
                     self.expect(&TokenKind::Op(Op::RArrow))?;
-                    let body = self.parse_expr_bp(0)?;
+                    let body = self.parse_body_after_block_intro()?;
                     arms.push(MatchArm { pat, guard, body });
                     self.skip_newlines();
                 }

@@ -1,4 +1,4 @@
-use vela_parser::{BinOp, Expr, Lit, parse_expr};
+use vela_parser::{BinOp, Expr, Lit, Param, parse_expr};
 
 fn p(src: &str) -> Expr {
     parse_expr(src).expect("parses")
@@ -11,7 +11,10 @@ fn lit(n: i64) -> Expr {
     Expr::Lit(Lit::Int(n))
 }
 fn lam(params: &[&str], body: Expr) -> Expr {
-    Expr::Lambda(params.iter().map(|s| s.to_string()).collect(), Box::new(body))
+    Expr::Lambda(
+        params.iter().map(|s| Param::from(*s)).collect(),
+        Box::new(body),
+    )
 }
 
 #[test]
