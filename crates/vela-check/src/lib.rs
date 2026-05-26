@@ -24,7 +24,7 @@ pub enum Type {
     Series(Box<Type>),
     Tuple(Vec<Type>),
     Record(Vec<(String, Type)>, Option<Box<Type>>),
-    DataFrame,
+    DataFrame(Option<Vec<(String, Type)>>),
     Option(Box<Type>),
     Result(Box<Type>, Box<Type>),
     Named(String, Vec<Type>),
@@ -58,7 +58,14 @@ impl Type {
                     Some(t) => format!("{{ {} | {} }}", parts.join(", "), t.show()),
                 }
             }
-            Type::DataFrame => "DataFrame".into(),
+            Type::DataFrame(schema) => match schema {
+                None => "DataFrame".into(),
+                Some(fields) => {
+                    let parts: Vec<String> =
+                        fields.iter().map(|(n, t)| format!("{n}: {}", t.show())).collect();
+                    format!("DataFrame[{{ {} }}]", parts.join(", "))
+                }
+            },
             Type::Option(t) => format!("Option[{}]", t.show()),
             Type::Result(a, e) => format!("Result[{}, {}]", a.show(), e.show()),
             Type::Named(name, args) => {
@@ -412,6 +419,26 @@ impl Ctx {
             }
             (Type::Record(fa, ta), Type::Record(fb, tb)) => {
                 self.unify_records(&fa, ta.as_deref(), &fb, tb.as_deref())
+            }
+            (Type::DataFrame(None), Type::DataFrame(_))
+            | (Type::DataFrame(_), Type::DataFrame(None)) => Ok(()),
+            (Type::DataFrame(Some(a)), Type::DataFrame(Some(b))) => {
+                if a.len() != b.len() {
+                    return Err(TypeError::new(format!(
+                        "DataFrame schema arity mismatch: {} vs {}",
+                        a.len(),
+                        b.len()
+                    )));
+                }
+                for (na, ta) in &a {
+                    let Some((_, tb)) = b.iter().find(|(n, _)| n == na) else {
+                        return Err(TypeError::new(format!(
+                            "DataFrame schema missing column `{na}`"
+                        )));
+                    };
+                    self.unify(ta, tb)?;
+                }
+                Ok(())
             }
             (a, b) => Err(TypeError::new(format!(
                 "cannot unify {} with {}",
@@ -803,9 +830,11 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                         body_ty = rt_translated.clone();
                     } else {
                         ctx.unify(&body_ty, &rt_translated)?;
+                        body_ty = rt_translated;
                     }
                 } else {
                     ctx.unify(&body_ty, &rt_translated)?;
+                    body_ty = rt_translated;
                 }
             }
             let ty = param_types.into_iter().rev().fold(body_ty, |acc, pt| {
@@ -1174,9 +1203,24 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
         Expr::Field(target, name) => {
             let target_ty = infer(target, env, ctx)?;
             let resolved = ctx.resolve(&target_ty);
-            if matches!(resolved, Type::DataFrame) {
-                let inner = ctx.fresh_var();
-                return Ok(Type::Series(Box::new(Type::Option(Box::new(inner)))));
+            if let Type::DataFrame(schema) = &resolved {
+                match schema {
+                    Some(fields) => {
+                        if let Some((_, ft)) = fields.iter().find(|(n, _)| n == name) {
+                            return Ok(Type::Series(Box::new(Type::Option(Box::new(
+                                ft.clone(),
+                            )))));
+                        } else {
+                            return Err(TypeError::new(format!(
+                                "DataFrame schema has no column `{name}`"
+                            )));
+                        }
+                    }
+                    None => {
+                        let inner = ctx.fresh_var();
+                        return Ok(Type::Series(Box::new(Type::Option(Box::new(inner)))));
+                    }
+                }
             }
             if let Type::Named(nom_name, nom_args) = &resolved
                 && nom_args.is_empty()
@@ -1230,7 +1274,7 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
                 let inner = ctx.fresh_var();
                 ctx.unify(&t, &Type::Series(Box::new(inner)))?;
             }
-            Ok(Type::DataFrame)
+            Ok(Type::DataFrame(None))
         }
         Expr::Scope(body) => {
             let _ = infer(body, env, ctx)?;
@@ -1330,7 +1374,16 @@ impl TyTranslator {
             "Bool" if targs.is_empty() => Ok(Type::Bool),
             "String" if targs.is_empty() => Ok(Type::String),
             "Symbol" if targs.is_empty() => Ok(Type::Symbol),
-            "DataFrame" if targs.is_empty() => Ok(Type::DataFrame),
+            "DataFrame" if targs.is_empty() => Ok(Type::DataFrame(None)),
+            "DataFrame" if targs.len() == 1 => {
+                if let Type::Record(fields, None) = targs.into_iter().next().expect("len 1") {
+                    Ok(Type::DataFrame(Some(fields)))
+                } else {
+                    Err(TypeError::new(
+                        "DataFrame[schema] requires a record schema like { x : Float, y : Int }",
+                    ))
+                }
+            }
             "Option" if targs.len() == 1 => Ok(Type::Option(Box::new(targs.into_iter().next().expect("len 1")))),
             "Result" if targs.len() == 2 => {
                 let mut it = targs.into_iter();
