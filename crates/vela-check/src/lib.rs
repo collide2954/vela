@@ -1466,82 +1466,201 @@ fn check_exhaustive(
     ctx: &Ctx,
 ) -> Result<(), TypeError> {
     let resolved = ctx.resolve(scrut_ty);
-    for arm in arms {
-        if arm.guard.is_none() && is_absorbing(&arm.pat) {
-            return Ok(());
-        }
-    }
-    let required: Vec<String> = match &resolved {
-        Type::Bool => vec!["true".into(), "false".into()],
-        Type::Option(_) => vec!["None".into(), "Some".into()],
-        Type::Result(_, _) => vec!["Ok".into(), "Err".into()],
-        Type::Named(name, _) => match ctx.sums.get(name) {
-            Some(vs) => vs.clone(),
-            None => {
-                return Err(TypeError::new(format!(
-                    "non-exhaustive match: type {name} has no known variants"
-                )));
-            }
-        },
-        other => {
-            return Err(TypeError::new(format!(
-                "non-exhaustive match on {} (requires a wildcard arm)",
-                other.show()
-            )));
-        }
-    };
-    let mut covered = std::collections::BTreeSet::new();
-    for arm in arms {
-        if arm.guard.is_some() {
-            continue;
-        }
-        collect_covered(&arm.pat, &mut covered);
-    }
-    let missing: Vec<&String> = required.iter().filter(|c| !covered.contains(*c)).collect();
-    if !missing.is_empty() {
-        let names: Vec<String> = missing.into_iter().cloned().collect();
+    let pats: Vec<Pat> = arms
+        .iter()
+        .filter(|a| a.guard.is_none())
+        .map(|a| a.pat.clone())
+        .collect();
+    let refs: Vec<&Pat> = pats.iter().collect();
+    if let Some(witness) = missing_witness(&resolved, &refs, ctx) {
         return Err(TypeError::new(format!(
-            "non-exhaustive match - missing: {}",
-            names.join(", ")
+            "non-exhaustive match - missing pattern: {}",
+            show_pat(&witness)
         )));
     }
     Ok(())
 }
 
-fn is_absorbing(pat: &Pat) -> bool {
-    match pat {
-        Pat::Wildcard | Pat::Var(_) => true,
-        Pat::As(inner, _) => is_absorbing(inner),
-        Pat::Or(alts) => alts.iter().any(is_absorbing),
-        Pat::Tuple(pats) => pats.iter().all(is_absorbing),
-        Pat::Record(fields) => fields.iter().all(|(_, p)| is_absorbing(p)),
-        Pat::List(parts) => {
-            parts.len() == 1 && matches!(parts[0], ListPart::Rest(_))
+fn missing_witness(scrut_ty: &Type, patterns: &[&Pat], ctx: &Ctx) -> Option<Pat> {
+    if patterns.iter().any(|p| pat_covers_all(p)) {
+        return None;
+    }
+    let expanded = expand_or_patterns(patterns);
+    let expanded_refs: Vec<&Pat> = expanded.iter().collect();
+    match scrut_ty {
+        Type::Bool => {
+            let has_true = expanded_refs
+                .iter()
+                .any(|p| matches!(p, Pat::Lit(Lit::Bool(true))));
+            let has_false = expanded_refs
+                .iter()
+                .any(|p| matches!(p, Pat::Lit(Lit::Bool(false))));
+            if !has_true {
+                Some(Pat::Lit(Lit::Bool(true)))
+            } else if !has_false {
+                Some(Pat::Lit(Lit::Bool(false)))
+            } else {
+                None
+            }
         }
+        Type::Option(inner) => {
+            let has_none = expanded_refs.iter().any(|p| matches!(p, Pat::Cons(n, a) if n == "None" && a.is_empty()));
+            if !has_none {
+                return Some(Pat::Cons("None".into(), vec![]));
+            }
+            let some_inner: Vec<&Pat> = expanded_refs
+                .iter()
+                .filter_map(|p| match p {
+                    Pat::Cons(n, a) if n == "Some" && a.len() == 1 => Some(&a[0]),
+                    _ => None,
+                })
+                .collect();
+            if let Some(w) = missing_witness(inner, &some_inner, ctx) {
+                return Some(Pat::Cons("Some".into(), vec![w]));
+            }
+            None
+        }
+        Type::Result(ok_ty, err_ty) => {
+            let ok_inner: Vec<&Pat> = expanded_refs
+                .iter()
+                .filter_map(|p| match p {
+                    Pat::Cons(n, a) if n == "Ok" && a.len() == 1 => Some(&a[0]),
+                    _ => None,
+                })
+                .collect();
+            let err_inner: Vec<&Pat> = expanded_refs
+                .iter()
+                .filter_map(|p| match p {
+                    Pat::Cons(n, a) if n == "Err" && a.len() == 1 => Some(&a[0]),
+                    _ => None,
+                })
+                .collect();
+            if ok_inner.is_empty() {
+                return Some(Pat::Cons("Ok".into(), vec![Pat::Wildcard]));
+            }
+            if err_inner.is_empty() {
+                return Some(Pat::Cons("Err".into(), vec![Pat::Wildcard]));
+            }
+            if let Some(w) = missing_witness(ok_ty, &ok_inner, ctx) {
+                return Some(Pat::Cons("Ok".into(), vec![w]));
+            }
+            if let Some(w) = missing_witness(err_ty, &err_inner, ctx) {
+                return Some(Pat::Cons("Err".into(), vec![w]));
+            }
+            None
+        }
+        Type::Tuple(elem_tys) => {
+            let mut per_arm: Vec<Vec<&Pat>> = Vec::new();
+            for p in &expanded_refs {
+                if let Pat::Tuple(ps) = p
+                    && ps.len() == elem_tys.len()
+                {
+                    per_arm.push(ps.iter().collect());
+                }
+            }
+            if per_arm.is_empty() {
+                return Some(Pat::Tuple(elem_tys.iter().map(|_| Pat::Wildcard).collect()));
+            }
+            for (i, t) in elem_tys.iter().enumerate() {
+                let col: Vec<&Pat> = per_arm.iter().map(|row| row[i]).collect();
+                if let Some(w) = missing_witness(t, &col, ctx) {
+                    let mut tuple = vec![Pat::Wildcard; elem_tys.len()];
+                    tuple[i] = w;
+                    return Some(Pat::Tuple(tuple));
+                }
+            }
+            None
+        }
+        Type::Named(name, _) => {
+            let Some(variants) = ctx.sums.get(name) else {
+                return Some(Pat::Wildcard);
+            };
+            let covered: std::collections::BTreeSet<&String> = expanded_refs
+                .iter()
+                .filter_map(|p| match p {
+                    Pat::Cons(n, _) => Some(n),
+                    _ => None,
+                })
+                .collect();
+            for v in variants {
+                if !covered.contains(v) {
+                    return Some(Pat::Cons(v.clone(), vec![]));
+                }
+            }
+            None
+        }
+        _ => Some(Pat::Wildcard),
+    }
+}
+
+fn pat_covers_all(p: &Pat) -> bool {
+    match p {
+        Pat::Wildcard | Pat::Var(_) => true,
+        Pat::As(inner, _) => pat_covers_all(inner),
+        Pat::Or(alts) => alts.iter().any(pat_covers_all),
+        Pat::Tuple(pats) => pats.iter().all(pat_covers_all),
+        Pat::Record(fields) => fields.iter().all(|(_, p)| pat_covers_all(p)),
+        Pat::List(parts) => parts.len() == 1 && matches!(parts[0], ListPart::Rest(_)),
         _ => false,
     }
 }
 
-fn collect_covered(pat: &Pat, out: &mut std::collections::BTreeSet<String>) {
-    match pat {
-        Pat::Lit(Lit::Bool(true)) => {
-            out.insert("true".into());
-        }
-        Pat::Lit(Lit::Bool(false)) => {
-            out.insert("false".into());
-        }
-        Pat::Cons(name, _) => {
-            out.insert(name.clone());
-        }
-        Pat::As(inner, _) => collect_covered(inner, out),
+fn expand_or_patterns<'a>(patterns: &[&'a Pat]) -> Vec<Pat> {
+    let mut out = Vec::new();
+    for p in patterns {
+        push_pat(p, &mut out);
+    }
+    out
+}
+
+fn push_pat(p: &Pat, out: &mut Vec<Pat>) {
+    match p {
         Pat::Or(alts) => {
-            for p in alts {
-                collect_covered(p, out);
+            for a in alts {
+                push_pat(a, out);
             }
         }
-        _ => {}
+        Pat::As(inner, _) => push_pat(inner, out),
+        other => out.push(other.clone()),
     }
 }
+
+fn show_pat(p: &Pat) -> String {
+    match p {
+        Pat::Wildcard => "_".into(),
+        Pat::Var(n) => n.clone(),
+        Pat::Lit(Lit::Int(n)) => n.to_string(),
+        Pat::Lit(Lit::Float(f)) => f.to_string(),
+        Pat::Lit(Lit::Str(s)) => format!("{s:?}"),
+        Pat::Lit(Lit::Bool(b)) => b.to_string(),
+        Pat::Lit(Lit::Unit) => "()".into(),
+        Pat::Cons(n, args) => {
+            if args.is_empty() {
+                n.clone()
+            } else {
+                let parts: Vec<String> = args.iter().map(show_pat).collect();
+                format!("{n} {}", parts.join(" "))
+            }
+        }
+        Pat::Tuple(ps) => {
+            let parts: Vec<String> = ps.iter().map(show_pat).collect();
+            format!("({})", parts.join(", "))
+        }
+        Pat::Record(fs) => {
+            let parts: Vec<String> =
+                fs.iter().map(|(n, p)| format!("{n} = {}", show_pat(p))).collect();
+            format!("{{ {} }}", parts.join(", "))
+        }
+        Pat::Or(alts) => {
+            let parts: Vec<String> = alts.iter().map(show_pat).collect();
+            parts.join(" | ")
+        }
+        Pat::As(inner, n) => format!("{} as {n}", show_pat(inner)),
+        Pat::Range(lo, hi) => format!("{}..={}", show_pat(lo), show_pat(hi)),
+        Pat::List(_) => "[..]".into(),
+    }
+}
+
 
 fn infer_pat(
     pat: &Pat,
