@@ -18,7 +18,7 @@ fn simple_trait_one_method() {
             type_var: "t".into(),
             methods: vec![TraitMethodSig {
                 name: "show".into(),
-                params: vec![Param { name: "x".into(), ty: Some(con("t")) }],
+                params: vec![Param { pat: vela_parser::Pat::Var("x".into()), ty: Some(con("t")) }],
                 return_ty: con("String"),
             }],
         }),
@@ -50,7 +50,7 @@ fn simple_impl_block() {
             ty: con("Float"),
             methods: vec![ImplMethod {
                 name: "show".into(),
-                params: vec![Param { name: "x".into(), ty: None }],
+                params: vec![Param { pat: vela_parser::Pat::Var("x".into()), ty: None }],
                 return_ty: None,
                 body: Expr::Var("x".into()),
             }],

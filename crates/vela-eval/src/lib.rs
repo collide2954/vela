@@ -19,7 +19,7 @@ pub enum Value {
     Series(Vec<Value>),
     Record(Vec<(String, Value)>),
     Cons(String, Vec<Value>),
-    Closure { params: Vec<String>, body: Expr, env: Env },
+    Closure { params: Vec<Pat>, body: Expr, env: Env },
     Builtin(BuiltinFn),
 }
 
@@ -418,7 +418,7 @@ fn match_pat(pat: &Pat, value: &Value) -> Option<Vec<(String, Value)>> {
 
 fn make_closure(params: &[Param], body: &Expr, env: &Env) -> Value {
     Value::Closure {
-        params: params.iter().map(|p| p.name.clone()).collect(),
+        params: params.iter().map(|p| p.pat.clone()).collect(),
         body: body.clone(),
         env: env.clone(),
     }
@@ -436,7 +436,7 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, RuntimeError> {
             .lookup(name)
             .ok_or_else(|| RuntimeError::new(format!("unbound: {name}"))),
         Expr::Lambda(params, body) => Ok(Value::Closure {
-            params: params.clone(),
+            params: params.iter().map(|n| Pat::Var(n.clone())).collect(),
             body: (**body).clone(),
             env: env.clone(),
         }),
@@ -541,7 +541,15 @@ fn apply(f: Value, arg: Value) -> Result<Value, RuntimeError> {
             if params.is_empty() {
                 return Err(RuntimeError::new("calling a zero-parameter closure"));
             }
-            let inner_env = env.extend(params[0].clone(), arg);
+            let bindings = match_pat(&params[0], &arg)
+                .ok_or_else(|| RuntimeError::new(format!(
+                    "argument {} does not match parameter pattern",
+                    show(&arg)
+                )))?;
+            let mut inner_env = env;
+            for (n, v) in bindings {
+                inner_env = inner_env.extend(n, v);
+            }
             if params.len() == 1 {
                 eval(&body, &inner_env)
             } else {

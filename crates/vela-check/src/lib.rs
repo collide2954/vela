@@ -702,7 +702,11 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                     Some(ty) => translator.translate(ty, ctx)?,
                     None => ctx.fresh_var(),
                 };
-                inner_env = inner_env.extend(p.name.clone(), Scheme::mono(pt.clone()));
+                let (pat_ty, bindings) = infer_pat(&p.pat, &inner_env, ctx)?;
+                ctx.unify(&pt, &pat_ty)?;
+                for (n, t) in bindings {
+                    inner_env = inner_env.extend(n, Scheme::mono(t));
+                }
                 param_types.push(pt);
             }
             let body_ty = if params.is_empty() {
@@ -844,7 +848,11 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                         Some(t) => translator.translate(t, ctx)?,
                         None => ctx.fresh_var(),
                     };
-                    inner_env = inner_env.extend(p.name.clone(), Scheme::mono(pt.clone()));
+                    let (pat_ty, bindings) = infer_pat(&p.pat, &inner_env, ctx)?;
+                    ctx.unify(&pt, &pat_ty)?;
+                    for (n, t) in bindings {
+                        inner_env = inner_env.extend(n, Scheme::mono(t));
+                    }
                     param_types.push(pt);
                 }
                 let return_var = match &method.return_ty {
@@ -880,8 +888,18 @@ fn lambda_type(
     let mut env = env.clone();
     let mut param_types = Vec::with_capacity(params.len());
     for p in params {
-        let pt = ctx.fresh_var();
-        env = env.extend(p.name.clone(), Scheme::mono(pt.clone()));
+        let pt = match &p.ty {
+            Some(ty) => {
+                let mut tr = TyTranslator::new();
+                tr.translate(ty, ctx)?
+            }
+            None => ctx.fresh_var(),
+        };
+        let (pat_ty, bindings) = infer_pat(&p.pat, &env, ctx)?;
+        ctx.unify(&pt, &pat_ty)?;
+        for (n, t) in bindings {
+            env = env.extend(n, Scheme::mono(t));
+        }
         param_types.push(pt);
     }
     let return_ty = ctx.fresh_var();
@@ -931,7 +949,7 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
         Expr::Lambda(params, body) => {
             let params: Vec<vela_parser::Param> = params
                 .iter()
-                .map(|n| vela_parser::Param { name: n.clone(), ty: None })
+                .map(|n| vela_parser::Param { pat: Pat::Var(n.clone()), ty: None })
                 .collect();
             lambda_type(&params, body, env, ctx)
         }

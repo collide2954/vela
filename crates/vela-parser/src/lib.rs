@@ -63,19 +63,25 @@ pub struct ImplMethod {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Param {
-    pub name: String,
+    pub pat: Pat,
     pub ty: Option<Ty>,
+}
+
+impl Param {
+    pub fn simple_name(&self) -> Option<&str> {
+        if let Pat::Var(n) = &self.pat { Some(n) } else { None }
+    }
 }
 
 impl From<&str> for Param {
     fn from(name: &str) -> Self {
-        Param { name: name.into(), ty: None }
+        Param { pat: Pat::Var(name.into()), ty: None }
     }
 }
 
 impl From<String> for Param {
     fn from(name: String) -> Self {
-        Param { name, ty: None }
+        Param { pat: Pat::Var(name), ty: None }
     }
 }
 
@@ -331,7 +337,7 @@ impl Parser {
                     match self.peek() {
                         Some(TokenKind::Ident(_)) => {
                             let n = self.expect_ident()?;
-                            params.push(Param { name: n, ty: None });
+                            params.push(Param { pat: Pat::Var(n), ty: None });
                         }
                         Some(TokenKind::Punct(Punct::LParen)) => {
                             let save = self.pos;
@@ -340,6 +346,17 @@ impl Parser {
                                 params.push(p);
                             } else {
                                 self.pos = save;
+                                if let Some(p) = self.try_pattern_param() {
+                                    params.push(p);
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+                        Some(TokenKind::Punct(Punct::LBrace)) => {
+                            if let Some(p) = self.try_pattern_param() {
+                                params.push(p);
+                            } else {
                                 break;
                             }
                         }
@@ -485,7 +502,7 @@ impl Parser {
                         match self.peek() {
                             Some(TokenKind::Ident(_)) => {
                                 let n = self.expect_ident()?;
-                                params.push(Param { name: n, ty: None });
+                                params.push(Param { pat: Pat::Var(n), ty: None });
                             }
                             Some(TokenKind::Punct(Punct::LParen)) => {
                                 let save = self.pos;
@@ -569,7 +586,7 @@ impl Parser {
                 match self.peek() {
                     Some(TokenKind::Ident(_)) => {
                         let n = self.expect_ident()?;
-                        params.push(Param { name: n, ty: None });
+                        params.push(Param { pat: Pat::Var(n), ty: None });
                     }
                     Some(TokenKind::Punct(Punct::LParen)) => {
                         let save = self.pos;
@@ -616,6 +633,16 @@ impl Parser {
         Ok(params)
     }
 
+    fn try_pattern_param(&mut self) -> Option<Param> {
+        let save = self.pos;
+        let pat = self.parse_pat_atom().ok()?;
+        if !is_irrefutable_param_pat(&pat) {
+            self.pos = save;
+            return None;
+        }
+        Some(Param { pat, ty: None })
+    }
+
     fn try_typed_param(&mut self) -> Option<Param> {
         let save = self.pos;
         let name = match self.peek() {
@@ -633,7 +660,7 @@ impl Parser {
             return None;
         }
         self.bump();
-        Some(Param { name, ty: Some(ty) })
+        Some(Param { pat: Pat::Var(name), ty: Some(ty) })
     }
 
     fn parse_import(&mut self, public: bool) -> Result<Stmt, ParseError> {
@@ -1312,6 +1339,17 @@ impl Parser {
 
 const APP_BP: u8 = 25;
 const FIELD_BP: u8 = 28;
+
+fn is_irrefutable_param_pat(pat: &Pat) -> bool {
+    match pat {
+        Pat::Wildcard | Pat::Var(_) => true,
+        Pat::Lit(Lit::Unit) => true,
+        Pat::Tuple(ps) => ps.iter().all(is_irrefutable_param_pat),
+        Pat::Record(fs) => fs.iter().all(|(_, p)| is_irrefutable_param_pat(p)),
+        Pat::As(inner, _) => is_irrefutable_param_pat(inner),
+        _ => false,
+    }
+}
 
 fn starts_with_uppercase(s: &str) -> bool {
     s.chars().next().is_some_and(|c| c.is_ascii_uppercase())

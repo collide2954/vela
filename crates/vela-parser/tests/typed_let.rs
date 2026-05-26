@@ -30,7 +30,7 @@ fn let_function_with_typed_parameter() {
         s("let id (x : Int) = x"),
         Stmt::Let {
             name: "id".into(),
-            params: vec![Param { name: "x".into(), ty: Some(con("Int")) }],
+            params: vec![Param { pat: vela_parser::Pat::Var("x".into()), ty: Some(con("Int")) }],
             return_ty: None,
             body: Expr::Var("x".into()),
         },
@@ -42,7 +42,7 @@ fn let_function_with_typed_param_and_return_type() {
     let stmt = s("let standardize (xs : [Float]) : [Float] = xs");
     if let Stmt::Let { params, return_ty, .. } = stmt {
         assert_eq!(params.len(), 1);
-        assert_eq!(params[0].name, "xs");
+        assert_eq!(params[0].simple_name().unwrap(), "xs");
         assert_eq!(params[0].ty, Some(Ty::Series(Box::new(con("Float")))));
         assert_eq!(return_ty, Some(Ty::Series(Box::new(con("Float")))));
     } else {
@@ -67,11 +67,11 @@ fn mixed_typed_and_untyped_params() {
     let stmt = s("let f x (y : Int) z = x");
     if let Stmt::Let { params, .. } = stmt {
         assert_eq!(params.len(), 3);
-        assert_eq!(params[0].name, "x");
+        assert_eq!(params[0].simple_name().unwrap(), "x");
         assert_eq!(params[0].ty, None);
-        assert_eq!(params[1].name, "y");
+        assert_eq!(params[1].simple_name().unwrap(), "y");
         assert_eq!(params[1].ty, Some(con("Int")));
-        assert_eq!(params[2].name, "z");
+        assert_eq!(params[2].simple_name().unwrap(), "z");
         assert_eq!(params[2].ty, None);
     } else {
         panic!("expected let");
