@@ -205,6 +205,20 @@ pub enum Op {
         dst: Reg,
         src: Reg,
     },
+
+    IsCons {
+        dst: Reg,
+        scrut: Reg,
+        name: ConstIdx,
+    },
+    ConsArg {
+        dst: Reg,
+        src: Reg,
+        idx: u16,
+    },
+    Panic {
+        msg: ConstIdx,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

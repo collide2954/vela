@@ -516,6 +516,12 @@ impl Session {
         let t = infer(&expr, &self.env, &mut self.ctx)?;
         Ok(self.ctx.resolve(&t))
     }
+
+    pub fn names(&self) -> Vec<String> {
+        let mut ns: Vec<String> = self.env.bindings.keys().cloned().collect();
+        ns.sort();
+        ns
+    }
 }
 
 impl Type {

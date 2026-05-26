@@ -300,6 +300,38 @@ fn exec(
                 let result = call_value(module, &f_v, &a, globals)?;
                 regs[*dst as usize] = result;
             }
+            Op::IsCons { dst, scrut, name } => {
+                let want = match &f.consts[*name as usize] {
+                    Const::CtorName(s) => s,
+                    other => {
+                        return Err(RuntimeError::new(format!(
+                            "IsCons name must be CtorName, got {other:?}"
+                        )));
+                    }
+                };
+                let matched = matches!(&regs[*scrut as usize], Value::Cons(c) if c.name == *want);
+                regs[*dst as usize] = Value::Bool(matched);
+            }
+            Op::ConsArg { dst, src, idx } => {
+                let v = match &regs[*src as usize] {
+                    Value::Cons(c) => c
+                        .args
+                        .get(*idx as usize)
+                        .cloned()
+                        .ok_or_else(|| RuntimeError::new("ConsArg index out of range"))?,
+                    other => {
+                        return Err(RuntimeError::new(format!("ConsArg on non-Cons: {other:?}")));
+                    }
+                };
+                regs[*dst as usize] = v;
+            }
+            Op::Panic { msg } => {
+                let m = match &f.consts[*msg as usize] {
+                    Const::Str(s) => s.clone(),
+                    other => format!("{other:?}"),
+                };
+                return Err(RuntimeError::new(m));
+            }
             Op::GetGlobal { dst, name } => {
                 let name_str = match &f.consts[*name as usize] {
                     Const::GlobalName(s) => s,
