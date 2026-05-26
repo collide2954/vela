@@ -693,9 +693,14 @@ fn prelude(ctx: &mut Ctx) -> Env {
 
 fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
     match stmt {
-        Stmt::Let { name, params, return_ty, body } => {
+        Stmt::Let { name, params, return_ty, body, recursive } => {
             let mut translator = TyTranslator::new();
             let mut inner_env = env.clone();
+            if *recursive {
+                let placeholder = ctx.fresh_var();
+                inner_env =
+                    inner_env.extend(name.clone(), Scheme::mono(placeholder));
+            }
             let mut param_types = Vec::with_capacity(params.len());
             for p in params {
                 let pt = match &p.ty {

@@ -246,13 +246,23 @@ pub fn show(v: &Value) -> String {
 
 fn eval_stmt(stmt: &Stmt, env: &mut Env) -> Result<Value, RuntimeError> {
     match stmt {
-        Stmt::Let { name, params, body, .. } => {
-            let value = if params.is_empty() {
-                eval(body, env)?
+        Stmt::Let { name, params, body, recursive, .. } => {
+            if *recursive {
+                *env = env.extend(name.clone(), Value::Unit);
+                let value = if params.is_empty() {
+                    eval(body, env)?
+                } else {
+                    make_closure(params, body, env)
+                };
+                env.mutate(name, value);
             } else {
-                make_closure(params, body, env)
-            };
-            *env = env.extend(name.clone(), value);
+                let value = if params.is_empty() {
+                    eval(body, env)?
+                } else {
+                    make_closure(params, body, env)
+                };
+                *env = env.extend(name.clone(), value);
+            }
             Ok(Value::Unit)
         }
         Stmt::Var { name, body, .. } => {

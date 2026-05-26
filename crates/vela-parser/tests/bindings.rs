@@ -15,7 +15,7 @@ fn lit(n: i64) -> Expr {
 fn simple_let_binding() {
     assert_eq!(
         s("let x = 1"),
-        Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) },
+        Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1), recursive: false },
     );
 }
 
@@ -28,6 +28,7 @@ fn let_binding_to_expression() {
             params: vec![],
             return_ty: None,
             body: Expr::BinOp(BinOp::Add, Box::new(lit(1)), Box::new(lit(2))),
+            recursive: false,
         },
     );
 }
@@ -41,6 +42,7 @@ fn let_function_one_param() {
             params: vec!["x".into()],
             return_ty: None,
             body: var("x"),
+            recursive: false,
         },
     );
 }
@@ -54,6 +56,7 @@ fn let_function_two_params() {
             params: vec!["x".into(), "y".into()],
             return_ty: None,
             body: Expr::BinOp(BinOp::Add, Box::new(var("x")), Box::new(var("y"))),
+            recursive: false,
         },
     );
 }

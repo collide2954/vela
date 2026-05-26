@@ -10,7 +10,13 @@ pub struct Program {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
-    Let { name: String, params: Vec<Param>, return_ty: Option<Ty>, body: Expr },
+    Let {
+        name: String,
+        params: Vec<Param>,
+        return_ty: Option<Ty>,
+        body: Expr,
+        recursive: bool,
+    },
     Var { name: String, ty: Option<Ty>, body: Expr },
     Mutate { name: String, body: Expr },
     For { binding: String, iter: Expr, body: Expr },
@@ -320,6 +326,15 @@ impl Parser {
         match self.peek() {
             Some(TokenKind::Keyword(Keyword::Let)) => {
                 self.bump();
+                let recursive = if matches!(
+                    self.peek(),
+                    Some(TokenKind::Keyword(Keyword::Rec))
+                ) {
+                    self.bump();
+                    true
+                } else {
+                    false
+                };
                 if matches!(
                     self.peek(),
                     Some(TokenKind::Punct(
@@ -371,7 +386,7 @@ impl Parser {
                 };
                 self.expect(&TokenKind::Op(Op::Assign))?;
                 let body = self.parse_body_after_block_intro()?;
-                Ok(Stmt::Let { name, params, return_ty, body })
+                Ok(Stmt::Let { name, params, return_ty, body, recursive })
             }
             Some(TokenKind::Keyword(Keyword::Var)) => {
                 self.bump();

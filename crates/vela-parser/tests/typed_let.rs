@@ -20,6 +20,7 @@ fn let_binding_with_return_type_annotation() {
                 Box::new(Expr::Var("mean".into())),
                 Box::new(Expr::Var("xs".into())),
             ),
+            recursive: false,
         },
     );
 }
@@ -33,6 +34,7 @@ fn let_function_with_typed_parameter() {
             params: vec![Param { pat: vela_parser::Pat::Var("x".into()), ty: Some(con("Int")) }],
             return_ty: None,
             body: Expr::Var("x".into()),
+            recursive: false,
         },
     );
 }
@@ -87,6 +89,7 @@ fn untyped_let_still_works() {
             params: vec![],
             return_ty: None,
             body: Expr::Lit(Lit::Int(1)),
+            recursive: false,
         },
     );
 }

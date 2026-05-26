@@ -95,9 +95,22 @@ fn record_field_access() {
 }
 
 #[test]
-fn recursion_via_let() {
-    // Vela's let isn't recursive by default in our impl, so this would
-    // need a fix. Skipping for now.
+fn let_rec_factorial() {
+    let src = "let rec fact n = if n == 0 then 1 else n * fact (n - 1)\nfact 5";
+    assert_eq!(r(src), Value::Int(120));
+}
+
+#[test]
+fn let_rec_fibonacci() {
+    let src =
+        "let rec fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)\nfib 10";
+    assert_eq!(r(src), Value::Int(55));
+}
+
+#[test]
+fn non_recursive_let_shadows_outer() {
+    let src = "let x = 1\nlet x = x + 1\nx";
+    assert_eq!(r(src), Value::Int(2));
 }
 
 #[test]

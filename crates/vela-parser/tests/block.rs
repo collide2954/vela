@@ -15,7 +15,7 @@ fn lit(n: i64) -> Expr {
 fn single_line_let_body_unchanged() {
     assert_eq!(
         s("let x = 1"),
-        Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) },
+        Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1), recursive: false },
     );
 }
 
@@ -23,7 +23,7 @@ fn single_line_let_body_unchanged() {
 fn indented_singleton_block_unwraps() {
     assert_eq!(
         s("let x =\n    1"),
-        Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1) },
+        Stmt::Let { name: "x".into(), params: vec![], return_ty: None, body: lit(1), recursive: false },
     );
 }
 
@@ -36,6 +36,7 @@ fn indented_multi_statement_block() {
             params: vec![],
             return_ty: None,
             body: Expr::BinOp(BinOp::Add, Box::new(var("y")), Box::new(lit(1))),
+            recursive: false,
         }],
         trailing: Some(Box::new(Expr::BinOp(
             BinOp::Mul,
@@ -45,7 +46,7 @@ fn indented_multi_statement_block() {
     };
     assert_eq!(
         stmt,
-        Stmt::Let { name: "f".into(), params: vec!["y".into()], return_ty: None, body: expected_body },
+        Stmt::Let { name: "f".into(), params: vec!["y".into()], return_ty: None, body: expected_body, recursive: false },
     );
 }
 
