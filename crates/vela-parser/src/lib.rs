@@ -1528,6 +1528,7 @@ impl Parser {
                 if arms.is_empty() {
                     return Err(ParseError::new("match expression has no arms"));
                 }
+                self.last_was_block = true;
                 Ok(Expr::Match(Box::new(scrut), arms))
             }
             TokenKind::Punct(Punct::LParen) => {

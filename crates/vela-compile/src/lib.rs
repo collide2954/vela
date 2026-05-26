@@ -4,7 +4,7 @@
 //! here is one the VM can execute. See `docs/ARCHITECTURE.md`.
 
 use vela_bytecode::{Const, ConstIdx, Function, FunctionId, Module, Op, Reg, UpvalDesc, UpvalIdx};
-use vela_parser::{BinOp, Expr, Lit, Param, Pat, Program, Stmt, UnOp, parse_program};
+use vela_parser::{BinOp, Expr, Lit, MatchArm, Param, Pat, Program, Stmt, UnOp, parse_program};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompileError {
@@ -250,6 +250,7 @@ impl Ctx {
             Expr::Series(elems) => self.make_seq(elems, true),
             Expr::Record(fields) => self.make_record(fields),
             Expr::Field(target, name) => self.field_access(target, name),
+            Expr::Match(scrut, arms) => self.match_expr(scrut, arms),
             other => Err(CompileError::new(format!(
                 "compiler does not yet handle expr: {other:?}"
             ))),
@@ -483,6 +484,123 @@ impl Ctx {
         Ok(dst)
     }
 
+    fn match_expr(&mut self, scrut: &Expr, arms: &[MatchArm]) -> Result<Reg, CompileError> {
+        if arms.is_empty() {
+            return Err(CompileError::new("match has no arms"));
+        }
+        let scrut_reg = self.expr(scrut)?;
+        let dst = self.cur().alloc();
+        let mut end_jumps: Vec<usize> = Vec::new();
+        for (i, arm) in arms.iter().enumerate() {
+            let is_last = i == arms.len() - 1;
+            let saved_locals = self.cur().locals.len();
+            let saved_next = self.cur().next_reg;
+            let mut fail_jumps: Vec<usize> = Vec::new();
+            self.compile_pat_test(&arm.pat, scrut_reg, &mut fail_jumps)?;
+            if let Some(_g) = &arm.guard {
+                return Err(CompileError::new(
+                    "guards in match arms are not yet lowered to bytecode",
+                ));
+            }
+            let body_val = self.expr(&arm.body)?;
+            self.cur().emit(Op::Move { dst, src: body_val });
+            let jmp = self.cur().pc();
+            self.cur().emit(Op::Jump { offset: 0 });
+            end_jumps.push(jmp);
+            let next_arm_pc = self.cur().pc() as i32;
+            for fp in fail_jumps {
+                let cur = self.cur();
+                if let Op::JumpIfFalse { offset, .. } = &mut cur.func.code[fp] {
+                    *offset = next_arm_pc - fp as i32 - 1;
+                }
+            }
+            self.cur().locals.truncate(saved_locals);
+            self.cur().next_reg = saved_next;
+            if is_last {
+                let msg = self.cur().intern(Const::Str("non-exhaustive match".into()));
+                self.cur().emit(Op::Panic { msg });
+            }
+        }
+        let end_pc = self.cur().pc() as i32;
+        for jp in end_jumps {
+            let cur = self.cur();
+            if let Op::Jump { offset } = &mut cur.func.code[jp] {
+                *offset = end_pc - jp as i32 - 1;
+            }
+        }
+        Ok(dst)
+    }
+
+    fn compile_pat_test(
+        &mut self,
+        pat: &Pat,
+        scrut: Reg,
+        fail_jumps: &mut Vec<usize>,
+    ) -> Result<(), CompileError> {
+        match pat {
+            Pat::Wildcard => Ok(()),
+            Pat::Var(name) => {
+                self.cur().locals.push(Local {
+                    name: name.clone(),
+                    reg: scrut,
+                });
+                Ok(())
+            }
+            Pat::Lit(l) => {
+                let k = lit_const(l);
+                let cur = self.cur();
+                let kidx = cur.intern(k);
+                let lit_reg = cur.alloc();
+                cur.emit(Op::LoadConst {
+                    dst: lit_reg,
+                    k: kidx,
+                });
+                let eq_reg = cur.alloc();
+                cur.emit(Op::Eq {
+                    dst: eq_reg,
+                    a: scrut,
+                    b: lit_reg,
+                });
+                let jf = cur.pc();
+                cur.emit(Op::JumpIfFalse {
+                    cond: eq_reg,
+                    offset: 0,
+                });
+                fail_jumps.push(jf);
+                Ok(())
+            }
+            Pat::Cons(name, args) => {
+                let name_idx = self.cur().intern(Const::CtorName(name.clone()));
+                let cur = self.cur();
+                let test_reg = cur.alloc();
+                cur.emit(Op::IsCons {
+                    dst: test_reg,
+                    scrut,
+                    name: name_idx,
+                });
+                let jf = cur.pc();
+                cur.emit(Op::JumpIfFalse {
+                    cond: test_reg,
+                    offset: 0,
+                });
+                fail_jumps.push(jf);
+                for (i, sub) in args.iter().enumerate() {
+                    let arg_reg = self.cur().alloc();
+                    self.cur().emit(Op::ConsArg {
+                        dst: arg_reg,
+                        src: scrut,
+                        idx: i as u16,
+                    });
+                    self.compile_pat_test(sub, arg_reg, fail_jumps)?;
+                }
+                Ok(())
+            }
+            other => Err(CompileError::new(format!(
+                "compiler does not yet handle pattern: {other:?}"
+            ))),
+        }
+    }
+
     fn app(&mut self, f: &Expr, arg: &Expr) -> Result<Reg, CompileError> {
         let callee = self.expr(f)?;
         let arg_v = self.expr(arg)?;
@@ -500,5 +618,18 @@ impl Ctx {
             nargs: 1,
         });
         Ok(dst)
+    }
+}
+
+fn lit_const(l: &Lit) -> Const {
+    match l {
+        Lit::Int(n) => Const::Int(*n),
+        Lit::UInt(n) => Const::UInt(*n),
+        Lit::BigInt(s) => Const::BigInt(s.clone()),
+        Lit::Float(f) => Const::Float(*f),
+        Lit::Decimal(s) => Const::Decimal(s.clone()),
+        Lit::Str(s) => Const::Str(s.clone()),
+        Lit::Bool(b) => Const::Bool(*b),
+        Lit::Unit => Const::Unit,
     }
 }

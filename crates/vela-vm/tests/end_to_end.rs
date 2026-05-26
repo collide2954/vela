@@ -161,6 +161,42 @@ fn ok_constructor_through_let() {
 }
 
 #[test]
+fn match_literal_int() {
+    let src = "match 2 with\n| 1 -> 10\n| 2 -> 20\n| _ -> 0";
+    assert_eq!(r(src), Value::Int(20));
+}
+
+#[test]
+fn match_option_some_extracts() {
+    let src = "match Some 7 with\n| None -> 0\n| Some x -> x";
+    assert_eq!(r(src), Value::Int(7));
+}
+
+#[test]
+fn match_option_none() {
+    let src = "let x = None\nmatch x with\n| None -> -1\n| Some _ -> 0";
+    assert_eq!(r(src), Value::Int(-1));
+}
+
+#[test]
+fn match_result_chained() {
+    let src = "let f r = match r with\n| Ok n -> n + 1\n| Err _ -> 0\nf (Ok 41)";
+    assert_eq!(r(src), Value::Int(42));
+}
+
+#[test]
+fn match_nested_constructor() {
+    let src = "let v = Some (Ok 100)\nmatch v with\n| None -> 0\n| Some (Err _) -> -1\n| Some (Ok n) -> n";
+    assert_eq!(r(src), Value::Int(100));
+}
+
+#[test]
+fn match_var_binds() {
+    let src = "match 42 with\n| n -> n + 1";
+    assert_eq!(r(src), Value::Int(43));
+}
+
+#[test]
 fn constructor_passed_to_function() {
     use std::rc::Rc;
     use vela_vm::ConsValue;
