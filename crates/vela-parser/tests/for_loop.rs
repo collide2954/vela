@@ -1,4 +1,4 @@
-use vela_parser::{Expr, Lit, Stmt, parse_stmt};
+use vela_parser::{Expr, Lit, Pat, Stmt, parse_stmt};
 
 fn s(src: &str) -> Stmt {
     parse_stmt(src).expect("parses")
@@ -19,7 +19,7 @@ fn single_line_for_loop() {
     assert_eq!(
         s("for x in xs: println x"),
         Stmt::For {
-            binding: "x".into(),
+            binding: Pat::Var("x".into()),
             iter: var("xs"),
             body: app(var("println"), var("x")),
         },
@@ -30,7 +30,7 @@ fn single_line_for_loop() {
 fn for_loop_with_indented_block() {
     let stmt = s("for x in xs:\n    println x\n    println x");
     if let Stmt::For { binding, iter, body } = stmt {
-        assert_eq!(binding, "x");
+        assert_eq!(binding, Pat::Var("x".into()));
         assert_eq!(iter, var("xs"));
         if let Expr::Block { stmts, trailing } = body {
             assert_eq!(stmts.len(), 1);
@@ -47,7 +47,7 @@ fn for_loop_with_indented_block() {
 fn for_loop_with_mutation() {
     let stmt = s("for x in xs:\n    total <- total + x");
     if let Stmt::For { binding, body, .. } = stmt {
-        assert_eq!(binding, "x");
+        assert_eq!(binding, Pat::Var("x".into()));
         match body {
             Expr::Block { stmts, .. } => {
                 assert_eq!(stmts.len(), 1);
@@ -66,7 +66,7 @@ fn for_loop_over_range() {
     assert_eq!(
         s("for i in r: process i"),
         Stmt::For {
-            binding: "i".into(),
+            binding: Pat::Var("i".into()),
             iter: var("r"),
             body: app(var("process"), var("i")),
         },

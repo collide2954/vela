@@ -294,7 +294,16 @@ fn eval_stmt(stmt: &Stmt, env: &mut Env) -> Result<Value, RuntimeError> {
             match iter_v {
                 Value::Series(vs) => {
                     for v in vs {
-                        let inner = env.extend(binding.clone(), v);
+                        let bindings = match_pat(binding, &v).ok_or_else(|| {
+                            RuntimeError::new(format!(
+                                "for-loop element {} does not match pattern",
+                                show(&v)
+                            ))
+                        })?;
+                        let mut inner = env.clone();
+                        for (n, bv) in bindings {
+                            inner = inner.extend(n, bv);
+                        }
                         eval(body, &inner)?;
                     }
                     Ok(Value::Unit)

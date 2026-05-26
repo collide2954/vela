@@ -164,6 +164,12 @@ fn lambda_block_body() {
 }
 
 #[test]
+fn for_loop_tuple_pattern() {
+    let src = "var total = 0\nfor (a, b) in [(1, 2), (3, 4)]:\n    total <- total + a + b\ntotal";
+    assert_eq!(r(src), Value::Int(10));
+}
+
+#[test]
 fn match_arm_block_body() {
     let src = "let v = Some 3\nmatch v with\n| Some x ->\n    let y = x + 1\n    y * 2\n| None -> 0";
     assert_eq!(r(src), Value::Int(8));

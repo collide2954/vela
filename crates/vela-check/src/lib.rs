@@ -857,7 +857,12 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             let iter_ty = infer(iter, env, ctx)?;
             let elem_ty = ctx.fresh_var();
             ctx.unify(&iter_ty, &Type::Series(Box::new(elem_ty.clone())))?;
-            let body_env = env.extend(binding.clone(), Scheme::mono(elem_ty));
+            let (pat_ty, bindings) = infer_pat(binding, env, ctx)?;
+            ctx.unify(&elem_ty, &pat_ty)?;
+            let mut body_env = env.clone();
+            for (n, t) in bindings {
+                body_env = body_env.extend(n, Scheme::mono(t));
+            }
             let body_ty = infer(body, &body_env, ctx)?;
             ctx.unify(&body_ty, &Type::Unit)?;
             Ok(Type::Unit)

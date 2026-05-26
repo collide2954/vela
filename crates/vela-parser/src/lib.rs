@@ -20,7 +20,7 @@ pub enum Stmt {
     LetRecGroup(Vec<LetBinding>),
     Var { name: String, ty: Option<Ty>, body: Expr },
     Mutate { name: String, body: Expr },
-    For { binding: String, iter: Expr, body: Expr },
+    For { binding: Pat, iter: Expr, body: Expr },
     Destructure { pat: Pat, body: Expr },
     TypeDecl(TypeDecl),
     TraitDecl(TraitDecl),
@@ -391,7 +391,7 @@ impl Parser {
             }
             Some(TokenKind::Keyword(Keyword::For)) => {
                 self.bump();
-                let binding = self.expect_ident()?;
+                let binding = self.parse_for_binding()?;
                 self.expect(&TokenKind::Keyword(Keyword::In))?;
                 let iter = self.parse_expr_bp(0)?;
                 self.expect(&TokenKind::Punct(Punct::Colon))?;
@@ -865,6 +865,24 @@ impl Parser {
             }
         }
         Ok(fields)
+    }
+
+    fn parse_for_binding(&mut self) -> Result<Pat, ParseError> {
+        match self.peek() {
+            Some(TokenKind::Punct(Punct::LParen | Punct::LBrace | Punct::LBracket)) => {
+                let pat = self.parse_pat_atom()?;
+                if !is_irrefutable_param_pat(&pat) {
+                    return Err(ParseError::new(
+                        "for-loop binding must be an irrefutable pattern",
+                    ));
+                }
+                Ok(pat)
+            }
+            _ => {
+                let n = self.expect_ident()?;
+                Ok(Pat::Var(n))
+            }
+        }
     }
 
     fn parse_let_binding_tail(&mut self) -> Result<LetBinding, ParseError> {
