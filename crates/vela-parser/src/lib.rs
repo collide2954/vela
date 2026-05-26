@@ -240,7 +240,10 @@ pub enum ListPart {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Lit {
     Int(i64),
+    UInt(u64),
+    BigInt(String),
     Float(f64),
+    Decimal(String),
     Str(String),
     Bool(bool),
     Unit,
@@ -1350,7 +1353,10 @@ impl Parser {
             .ok_or_else(|| ParseError::new("expected pattern atom"))?;
         match tok {
             TokenKind::Int(n) => Ok(Pat::Lit(Lit::Int(n))),
+            TokenKind::UInt(n) => Ok(Pat::Lit(Lit::UInt(n))),
+            TokenKind::BigInt(s) => Ok(Pat::Lit(Lit::BigInt(s))),
             TokenKind::Float(f) => Ok(Pat::Lit(Lit::Float(f))),
+            TokenKind::Decimal(s) => Ok(Pat::Lit(Lit::Decimal(s))),
             TokenKind::Str(s) => Ok(Pat::Lit(Lit::Str(s))),
             TokenKind::Bool(b) => Ok(Pat::Lit(Lit::Bool(b))),
             TokenKind::Ident(name) => {
@@ -1431,7 +1437,10 @@ impl Parser {
             .ok_or_else(|| ParseError::new("empty input").with_span(span.clone()))?;
         match tok {
             TokenKind::Int(n) => Ok(Expr::Lit(Lit::Int(n))),
+            TokenKind::UInt(n) => Ok(Expr::Lit(Lit::UInt(n))),
+            TokenKind::BigInt(s) => Ok(Expr::Lit(Lit::BigInt(s))),
             TokenKind::Float(f) => Ok(Expr::Lit(Lit::Float(f))),
+            TokenKind::Decimal(s) => Ok(Expr::Lit(Lit::Decimal(s))),
             TokenKind::Str(s) => Ok(Expr::Lit(Lit::Str(s))),
             TokenKind::Bool(b) => Ok(Expr::Lit(Lit::Bool(b))),
             TokenKind::Ident(name) => Ok(Expr::Var(name)),

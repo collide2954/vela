@@ -1284,7 +1284,10 @@ fn lambda_type(
 fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
     match expr {
         Expr::Lit(Lit::Int(_)) => Ok(Type::Int),
+        Expr::Lit(Lit::UInt(_)) => Ok(Type::UInt),
+        Expr::Lit(Lit::BigInt(_)) => Ok(Type::BigInt),
         Expr::Lit(Lit::Float(_)) => Ok(Type::Float),
+        Expr::Lit(Lit::Decimal(_)) => Ok(Type::Decimal),
         Expr::Lit(Lit::Str(_)) => Ok(Type::String),
         Expr::Lit(Lit::Bool(_)) => Ok(Type::Bool),
         Expr::Lit(Lit::Unit) => Ok(Type::Unit),
@@ -1827,7 +1830,10 @@ fn show_pat(p: &Pat) -> String {
         Pat::Wildcard => "_".into(),
         Pat::Var(n) => n.clone(),
         Pat::Lit(Lit::Int(n)) => n.to_string(),
+        Pat::Lit(Lit::UInt(n)) => format!("{n}u"),
+        Pat::Lit(Lit::BigInt(s)) => format!("{s}n"),
         Pat::Lit(Lit::Float(f)) => f.to_string(),
+        Pat::Lit(Lit::Decimal(s)) => format!("{s}d"),
         Pat::Lit(Lit::Str(s)) => format!("{s:?}"),
         Pat::Lit(Lit::Bool(b)) => b.to_string(),
         Pat::Lit(Lit::Unit) => "()".into(),
@@ -1872,7 +1878,10 @@ fn infer_pat(
             Ok((t.clone(), vec![(name.clone(), t)]))
         }
         Pat::Lit(Lit::Int(_)) => Ok((Type::Int, Vec::new())),
+        Pat::Lit(Lit::UInt(_)) => Ok((Type::UInt, Vec::new())),
+        Pat::Lit(Lit::BigInt(_)) => Ok((Type::BigInt, Vec::new())),
         Pat::Lit(Lit::Float(_)) => Ok((Type::Float, Vec::new())),
+        Pat::Lit(Lit::Decimal(_)) => Ok((Type::Decimal, Vec::new())),
         Pat::Lit(Lit::Str(_)) => Ok((Type::String, Vec::new())),
         Pat::Lit(Lit::Bool(_)) => Ok((Type::Bool, Vec::new())),
         Pat::Lit(Lit::Unit) => Ok((Type::Unit, Vec::new())),

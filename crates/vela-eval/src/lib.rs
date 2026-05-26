@@ -10,7 +10,10 @@ use vela_parser::{
 #[derive(Debug, Clone)]
 pub enum Value {
     Int(i64),
+    UInt(u64),
+    BigInt(String),
     Float(f64),
+    Decimal(String),
     Str(String),
     Bool(bool),
     Sym(String),
@@ -31,7 +34,10 @@ impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::UInt(a), Value::UInt(b)) => a == b,
+            (Value::BigInt(a), Value::BigInt(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::Decimal(a), Value::Decimal(b)) => a == b,
             (Value::Str(a), Value::Str(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::Sym(a), Value::Sym(b)) => a == b,
@@ -762,13 +768,24 @@ fn make_curried_cons(name: String, arity: usize, collected: Vec<Value>) -> Value
 pub fn show(v: &Value) -> String {
     match v {
         Value::Int(n) => n.to_string(),
+        Value::UInt(n) => format!("{n}u"),
+        Value::BigInt(s) => format!("{s}n"),
         Value::Float(f) => {
-            if f.fract() == 0.0 && f.is_finite() {
+            if f.is_nan() {
+                "NaN".into()
+            } else if f.is_infinite() {
+                if *f > 0.0 {
+                    "Inf".into()
+                } else {
+                    "-Inf".into()
+                }
+            } else if f.fract() == 0.0 {
                 format!("{f:.1}")
             } else {
                 f.to_string()
             }
         }
+        Value::Decimal(s) => format!("{s}d"),
         Value::Str(s) => s.clone(),
         Value::Bool(b) => b.to_string(),
         Value::Sym(s) => format!(":{s}"),
@@ -930,7 +947,10 @@ fn match_pat(pat: &Pat, value: &Value) -> Option<Vec<(String, Value)>> {
         (Pat::Wildcard, _) => Some(Vec::new()),
         (Pat::Var(name), v) => Some(vec![(name.clone(), v.clone())]),
         (Pat::Lit(Lit::Int(p)), Value::Int(v)) if p == v => Some(Vec::new()),
+        (Pat::Lit(Lit::UInt(p)), Value::UInt(v)) if p == v => Some(Vec::new()),
+        (Pat::Lit(Lit::BigInt(p)), Value::BigInt(v)) if p == v => Some(Vec::new()),
         (Pat::Lit(Lit::Float(p)), Value::Float(v)) if p == v => Some(Vec::new()),
+        (Pat::Lit(Lit::Decimal(p)), Value::Decimal(v)) if p == v => Some(Vec::new()),
         (Pat::Lit(Lit::Str(p)), Value::Str(v)) if p == v => Some(Vec::new()),
         (Pat::Lit(Lit::Bool(p)), Value::Bool(v)) if p == v => Some(Vec::new()),
         (Pat::Lit(Lit::Unit), Value::Unit) => Some(Vec::new()),
@@ -1052,7 +1072,10 @@ fn make_closure(params: &[Param], body: &Expr, env: &Env) -> Value {
 fn eval(expr: &Expr, env: &Env) -> Result<Value, RuntimeError> {
     match expr {
         Expr::Lit(Lit::Int(n)) => Ok(Value::Int(*n)),
+        Expr::Lit(Lit::UInt(n)) => Ok(Value::UInt(*n)),
+        Expr::Lit(Lit::BigInt(s)) => Ok(Value::BigInt(s.clone())),
         Expr::Lit(Lit::Float(f)) => Ok(Value::Float(*f)),
+        Expr::Lit(Lit::Decimal(s)) => Ok(Value::Decimal(s.clone())),
         Expr::Lit(Lit::Str(s)) => Ok(Value::Str(s.clone())),
         Expr::Lit(Lit::Bool(b)) => Ok(Value::Bool(*b)),
         Expr::Lit(Lit::Unit) => Ok(Value::Unit),
