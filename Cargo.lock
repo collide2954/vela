@@ -28,6 +28,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vela-compile"
+version = "0.1.0"
+dependencies = [
+ "vela-bytecode",
+ "vela-parser",
+]
+
+[[package]]
 name = "vela-diag"
 version = "0.1.0"
 
@@ -67,4 +75,12 @@ dependencies = [
  "vela-check",
  "vela-eval",
  "vela-parser",
+]
+
+[[package]]
+name = "vela-vm"
+version = "0.1.0"
+dependencies = [
+ "vela-bytecode",
+ "vela-compile",
 ]

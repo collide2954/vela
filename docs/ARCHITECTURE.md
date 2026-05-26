@@ -141,14 +141,25 @@ small dispatcher (`Match` instruction) that walks the decision tree.
 
 ### Profiling and JIT trigger
 
-Each `Chunk` carries a counter. Hot edges (back-branches, function
-entries) increment the counter. When it crosses a threshold the VM
-hands the chunk to `vela-jit`. The JIT compiles to native code via
-Cranelift, returns a function pointer, and the VM patches future calls
-to dispatch through it.
+Each `Chunk` carries an invocation counter. Function entries and
+back-branches increment it. When it crosses a fixed threshold (planned
+default: 1000) the VM hands the chunk to `vela-jit`, which compiles to
+native code via Cranelift and returns a function pointer. The VM
+patches the chunk's dispatch slot so future calls go to the native
+code.
 
-The JIT is *optional*: every program that runs under the VM also runs
-without the JIT, just slower. There is no JIT-only feature.
+The threshold is a counter, not a clock — required by the
+reproducibility rules in §10 of the spec. A program's observable
+output never depends on whether or when the JIT fired.
+
+The JIT is *off-able*, not optional in the sense of "sometimes
+absent." Specifically: a `--no-jit` flag, debug builds, and platforms
+where Cranelift isn't available all run the VM tier alone, and every
+program still produces the same result, just slower. A short program
+that exits before any function reaches the threshold may run pure-VM
+even with the JIT enabled — that's the expected case for one-shot
+scripts. Long-running computations, hot loops, and `vela notebook`
+sessions are where the JIT matters in practice.
 
 ### Reproducibility constraints
 
@@ -163,6 +174,26 @@ follow for the runtime:
    does not own a PRNG; the JIT does not introduce any.
 3. **No timing-dependent dispatch.** The JIT trigger is based on a
    counter (deterministic), not wall-clock time.
+
+### Mixed Vela/Rust packages
+
+`SPEC.md` §14 allows a package to contain a `rust/` subdirectory with
+its own Cargo crate. The Rust crate is built to native code by `cargo`
+and linked into the resulting Vela binary. The JIT does not touch Rust
+code — it has nothing to translate. Vela code reaches Rust through
+ordinary function calls, and the call site is identical whether the
+caller is running in the VM tier or the JIT tier. The JIT does not
+inline across the Rust boundary in 1.0.
+
+The contract:
+
+- The Rust dependency's content hash is pinned in `vela.lock`; the JIT
+  cannot perturb the bits that get linked in.
+- The calling convention at the boundary is fixed (the planned
+  "vela-abi", C-compatible) so the JIT emits exactly the same call
+  sequence as the VM dispatch path does.
+- Vela values that cross the boundary are passed through marshallers
+  the compiler emits once and both tiers reuse.
 
 ### Tier and deopt strategy
 

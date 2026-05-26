@@ -1,0 +1,14 @@
+[package]
+name         = "vela-compile"
+version      = { workspace = true }
+edition      = { workspace = true }
+rust-version = { workspace = true }
+license      = { workspace = true }
+repository   = { workspace = true }
+
+[dependencies]
+vela-bytecode = { path = "../vela-bytecode" }
+vela-parser   = { path = "../vela-parser" }
+
+[lints]
+workspace = true
