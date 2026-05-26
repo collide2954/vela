@@ -142,6 +142,7 @@ struct Ctx {
     subst: HashMap<u32, Type>,
     fresh: u32,
     sums: HashMap<String, Vec<String>>,
+    nominal_records: HashMap<String, Vec<(String, Type)>>,
     expected_return: Option<Type>,
     warnings: Vec<Warning>,
 }
@@ -156,6 +157,7 @@ impl Default for Ctx {
             subst: HashMap::new(),
             fresh: 0,
             sums,
+            nominal_records: HashMap::new(),
             expected_return: None,
             warnings: Vec::new(),
         }
@@ -718,6 +720,37 @@ fn prelude(ctx: &mut Ctx) -> Env {
     env
 }
 
+fn check_nominal_match(
+    name: &str,
+    expected: &[(String, Type)],
+    actual: &[(String, Type)],
+    ctx: &mut Ctx,
+) -> Result<(), TypeError> {
+    if expected.len() != actual.len() {
+        return Err(TypeError::new(format!(
+            "nominal record `{name}` expects {} field(s), got {}",
+            expected.len(),
+            actual.len()
+        )));
+    }
+    for (en, et) in expected {
+        let Some((_, at)) = actual.iter().find(|(n, _)| n == en) else {
+            return Err(TypeError::new(format!(
+                "nominal record `{name}` is missing field `{en}`"
+            )));
+        };
+        ctx.unify(et, at)?;
+    }
+    for (an, _) in actual {
+        if !expected.iter().any(|(n, _)| n == an) {
+            return Err(TypeError::new(format!(
+                "nominal record `{name}` has no field `{an}`"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
     match stmt {
         Stmt::Let { name, params, return_ty, body, recursive } => {
@@ -754,11 +787,26 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                 ctx.exit_function(saved);
                 ctx.resolve(&return_var)
             };
+            let mut body_ty = body_ty;
             if params.is_empty()
                 && let Some(rt) = return_ty
             {
                 let rt_translated = translator.translate(rt, ctx)?;
-                ctx.unify(&body_ty, &rt_translated)?;
+                if let Type::Named(nom_name, nom_args) = &rt_translated
+                    && nom_args.is_empty()
+                    && let Some(expected_fields) =
+                        ctx.nominal_records.get(nom_name).cloned()
+                {
+                    let resolved = ctx.resolve(&body_ty);
+                    if let Type::Record(actual, None) = &resolved {
+                        check_nominal_match(nom_name, &expected_fields, actual, ctx)?;
+                        body_ty = rt_translated.clone();
+                    } else {
+                        ctx.unify(&body_ty, &rt_translated)?;
+                    }
+                } else {
+                    ctx.unify(&body_ty, &rt_translated)?;
+                }
             }
             let ty = param_types.into_iter().rev().fold(body_ty, |acc, pt| {
                 Type::Fn(Box::new(pt), Box::new(acc))
@@ -869,7 +917,15 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                     }
                     ctx.sums.insert(decl.name.clone(), variant_names);
                 }
-                TypeDeclBody::Alias(_) => {}
+                TypeDeclBody::Alias(t) => {
+                    if let vela_parser::Ty::Record(fields) = t {
+                        let mut translated = Vec::with_capacity(fields.len());
+                        for (n, ft) in fields {
+                            translated.push((n.clone(), translator.translate(ft, ctx)?));
+                        }
+                        ctx.nominal_records.insert(decl.name.clone(), translated);
+                    }
+                }
             }
             Ok(Type::Unit)
         }
@@ -1121,6 +1177,13 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             if matches!(resolved, Type::DataFrame) {
                 let inner = ctx.fresh_var();
                 return Ok(Type::Series(Box::new(Type::Option(Box::new(inner)))));
+            }
+            if let Type::Named(nom_name, nom_args) = &resolved
+                && nom_args.is_empty()
+                && let Some(fields) = ctx.nominal_records.get(nom_name)
+                && let Some((_, ft)) = fields.iter().find(|(n, _)| n == name)
+            {
+                return Ok(ctx.resolve(ft));
             }
             let field_ty = ctx.fresh_var();
             let row_tail = ctx.fresh_var();
