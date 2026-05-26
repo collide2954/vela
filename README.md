@@ -12,11 +12,14 @@ The full language specification lives in [SPEC.md](SPEC.md).
 
 ## Status
 
-Pre-alpha. The lexer, parser, and a substantial type checker (Hindley-
-Milner with let polymorphism, user types, Option/Result, row-polymorphic
-records, pattern matching with guards) are in place. The runtime,
-standard library, formatter, and CLI subcommands are still to come.
-Nothing here is stable.
+Pre-alpha. In place: lexer, parser, type checker (Hindley-Milner with
+let polymorphism, user types, Option/Result, row-polymorphic records,
+nominal records, pattern matching with guards, nested exhaustiveness,
+shadowing warnings), and a tree-walking interpreter that runs the
+constructs the checker accepts. `vela run`, `vela check`, and
+`vela test` work end to end. The standard library is a small prelude;
+the formatter and package tooling are still to come. Nothing here is
+stable.
 
 ## A taste
 
@@ -102,6 +105,8 @@ tests =
         vela-lexer/    # lexical analysis
         vela-parser/   # syntactic analysis
         vela-check/    # type checking and inference
+        vela-eval/     # tree-walking interpreter
+        vela-diag/     # diagnostic rendering with spans
 
 The standard library will live under `std/` once the bootstrap compiler
 can run it.
