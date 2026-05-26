@@ -91,11 +91,16 @@ impl Env {
 #[derive(Debug, Clone)]
 pub struct RuntimeError {
     pub message: String,
+    pub short_circuit: Option<Value>,
 }
 
 impl RuntimeError {
     fn new(msg: impl Into<String>) -> Self {
-        Self { message: msg.into() }
+        Self { message: msg.into(), short_circuit: None }
+    }
+
+    fn short_circuit(value: Value) -> Self {
+        Self { message: "short-circuit".into(), short_circuit: Some(value) }
     }
 }
 
@@ -798,6 +803,21 @@ fn eval(expr: &Expr, env: &Env) -> Result<Value, RuntimeError> {
         }
         Expr::BinOp(op, l, r) => eval_binop(*op, l, r, env),
         Expr::UnaryOp(op, inner) => eval_unop(*op, inner, env),
+        Expr::Postfix(vela_parser::PostOp::Question, inner) => {
+            let v = eval(inner, env)?;
+            match &v {
+                Value::Cons(n, args) if n == "Ok" && args.len() == 1 => {
+                    Ok(args[0].clone())
+                }
+                Value::Cons(n, _) if n == "Err" => {
+                    Err(RuntimeError::short_circuit(v))
+                }
+                other => Err(RuntimeError::new(format!(
+                    "`?` expects a Result, got {}",
+                    show(other)
+                ))),
+            }
+        }
         Expr::Tuple(elems) => {
             let mut vs = Vec::with_capacity(elems.len());
             for e in elems {
@@ -891,7 +911,12 @@ fn apply(f: Value, arg: Value) -> Result<Value, RuntimeError> {
                 inner_env = inner_env.extend(n, v);
             }
             if params.len() == 1 {
-                eval(&body, &inner_env)
+                match eval(&body, &inner_env) {
+                    Err(e) if e.short_circuit.is_some() => {
+                        Ok(e.short_circuit.unwrap())
+                    }
+                    other => other,
+                }
             } else {
                 Ok(Value::Closure {
                     params: params[1..].to_vec(),
