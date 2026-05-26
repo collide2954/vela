@@ -671,15 +671,16 @@ fn prelude(ctx: &mut Ctx) -> Env {
             ty: fn_of(Type::Int, fn_of(Type::Int, series_of(Type::Int))),
         },
     );
-    // format : String -> [String] -> String
-    // (positional only: each `{}` is replaced left-to-right by elements)
-    env = env.extend(
-        "format".into(),
-        Scheme {
-            vars: Vec::new(),
-            ty: fn_of(Type::String, fn_of(series_of(Type::String), Type::String)),
-        },
-    );
+    {
+        let a = ctx.fresh_id();
+        env = env.extend(
+            "show".into(),
+            Scheme {
+                vars: vec![a],
+                ty: fn_of(Type::Var(a), Type::String),
+            },
+        );
+    }
     // println : a -> ()
     {
         let a = ctx.fresh_id();
@@ -1322,6 +1323,17 @@ fn infer(expr: &Expr, env: &Env, ctx: &mut Ctx) -> Result<Type, TypeError> {
             }
         }
         Expr::App(f, arg) => {
+            if let Expr::Var(name) = f.as_ref()
+                && name == "format"
+                && let Expr::Lit(Lit::Str(s)) = arg.as_ref()
+            {
+                let needed = s.matches("{}").count();
+                let mut ty = Type::String;
+                for _ in 0..needed {
+                    ty = Type::Fn(Box::new(ctx.fresh_var()), Box::new(ty));
+                }
+                return Ok(ty);
+            }
             let f_ty = infer(f, env, ctx)?;
             let arg_ty = infer(arg, env, ctx)?;
             let result = ctx.fresh_var();

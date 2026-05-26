@@ -443,42 +443,14 @@ fn prelude() -> Env {
                     show(&fmt)
                 )));
             };
-            Ok(builtin1(move |args| {
-                let Value::Series(vs) = args else {
-                    return Err(RuntimeError::new(format!(
-                        "format expects [String] arguments, got {}",
-                        show(&args)
-                    )));
-                };
-                let mut out = String::new();
-                let mut next = 0usize;
-                let chars: Vec<char> = template.chars().collect();
-                let mut i = 0;
-                while i < chars.len() {
-                    if i + 1 < chars.len() && chars[i] == '{' && chars[i + 1] == '}' {
-                        let arg = vs.get(next).ok_or_else(|| {
-                            RuntimeError::new(format!(
-                                "format: not enough arguments for template `{template}`"
-                            ))
-                        })?;
-                        let Value::Str(s) = arg else {
-                            return Err(RuntimeError::new(format!(
-                                "format expects [String], got element {}",
-                                show(arg)
-                            )));
-                        };
-                        out.push_str(s);
-                        next += 1;
-                        i += 2;
-                    } else {
-                        out.push(chars[i]);
-                        i += 1;
-                    }
-                }
-                Ok(Value::Str(out))
-            }))
+            let needed = template.matches("{}").count();
+            if needed == 0 {
+                return Ok(Value::Str(template));
+            }
+            Ok(format_collector(template, Vec::new(), needed))
         }),
     );
+    env = env.extend("show".into(), builtin1(|v| Ok(Value::Str(show(&v)))));
     env = env.extend("sum".into(), builtin1(|xs| sum_series(xs)));
     env = env.extend("mean".into(), builtin1(|xs| mean_series(xs)));
     env = env.extend("min".into(), builtin1(|xs| extremum_series(xs, true)));
@@ -604,6 +576,32 @@ fn prelude() -> Env {
         )]),
     );
     env
+}
+
+fn format_collector(template: String, collected: Vec<Value>, needed: usize) -> Value {
+    Value::Builtin(BuiltinFn(Rc::new(move |arg| {
+        let mut next = collected.clone();
+        next.push(arg);
+        if next.len() == needed {
+            let mut out = String::new();
+            let mut i = 0;
+            let chars: Vec<char> = template.chars().collect();
+            let mut k = 0;
+            while i < chars.len() {
+                if i + 1 < chars.len() && chars[i] == '{' && chars[i + 1] == '}' {
+                    out.push_str(&show(&next[k]));
+                    k += 1;
+                    i += 2;
+                } else {
+                    out.push(chars[i]);
+                    i += 1;
+                }
+            }
+            Ok(Value::Str(out))
+        } else {
+            Ok(format_collector(template.clone(), next, needed))
+        }
+    })))
 }
 
 fn builtin1(f: impl Fn(Value) -> Result<Value, RuntimeError> + 'static) -> Value {
