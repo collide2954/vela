@@ -525,6 +525,21 @@ fn prelude(ctx: &mut Ctx) -> Env {
         "sum".into(),
         Scheme { vars: Vec::new(), ty: fn_of(series_of(Type::Int), Type::Int) },
     );
+    // fold : (b -> a -> b) -> b -> [a] -> b
+    {
+        let a = ctx.fresh_id();
+        let b = ctx.fresh_id();
+        env = env.extend(
+            "fold".into(),
+            Scheme {
+                vars: vec![a, b],
+                ty: fn_of(
+                    fn_of(Type::Var(b), fn_of(Type::Var(a), Type::Var(b))),
+                    fn_of(Type::Var(b), fn_of(series_of(Type::Var(a)), Type::Var(b))),
+                ),
+            },
+        );
+    }
     // println : a -> ()
     {
         let a = ctx.fresh_id();

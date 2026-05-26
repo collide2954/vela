@@ -182,7 +182,310 @@ fn prelude() -> Env {
             ))),
         }))),
     );
+    env = env.extend("length".into(), builtin1(|v| match v {
+        Value::Series(vs) => Ok(Value::Int(vs.len() as i64)),
+        Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
+        other => Err(RuntimeError::new(format!(
+            "length expects a series or string, got {}",
+            show(&other)
+        ))),
+    }));
+    env = env.extend(
+        "map".into(),
+        builtin1(|f| {
+            Ok(builtin1(move |xs| match xs {
+                Value::Series(vs) => {
+                    let mut out = Vec::with_capacity(vs.len());
+                    for v in vs {
+                        out.push(apply(f.clone(), v)?);
+                    }
+                    Ok(Value::Series(out))
+                }
+                other => Err(RuntimeError::new(format!(
+                    "map expects a series, got {}",
+                    show(&other)
+                ))),
+            }))
+        }),
+    );
+    env = env.extend(
+        "filter".into(),
+        builtin1(|f| {
+            Ok(builtin1(move |xs| match xs {
+                Value::Series(vs) => {
+                    let mut out = Vec::new();
+                    for v in vs {
+                        match apply(f.clone(), v.clone())? {
+                            Value::Bool(true) => out.push(v),
+                            Value::Bool(false) => {}
+                            other => {
+                                return Err(RuntimeError::new(format!(
+                                    "filter predicate must return Bool, got {}",
+                                    show(&other)
+                                )));
+                            }
+                        }
+                    }
+                    Ok(Value::Series(out))
+                }
+                other => Err(RuntimeError::new(format!(
+                    "filter expects a series, got {}",
+                    show(&other)
+                ))),
+            }))
+        }),
+    );
+    env = env.extend(
+        "fold".into(),
+        builtin1(|f| {
+            Ok(builtin1(move |init| {
+                let f = f.clone();
+                Ok(builtin1(move |xs| match xs {
+                    Value::Series(vs) => {
+                        let mut acc = init.clone();
+                        for v in vs {
+                            let next = apply(f.clone(), acc)?;
+                            acc = apply(next, v)?;
+                        }
+                        Ok(acc)
+                    }
+                    other => Err(RuntimeError::new(format!(
+                        "fold expects a series, got {}",
+                        show(&other)
+                    ))),
+                }))
+            }))
+        }),
+    );
+    env = env.extend("sum".into(), builtin1(|xs| sum_series(xs)));
+    env = env.extend("mean".into(), builtin1(|xs| mean_series(xs)));
+    env = env.extend("min".into(), builtin1(|xs| extremum_series(xs, true)));
+    env = env.extend("max".into(), builtin1(|xs| extremum_series(xs, false)));
+    env = env.extend("std".into(), builtin1(|xs| std_series(xs)));
+    env = env.extend(
+        "Float".into(),
+        Value::Record(vec![
+            ("of_int".into(), builtin1(|v| match v {
+                Value::Int(n) => Ok(Value::Float(n as f64)),
+                other => Err(RuntimeError::new(format!(
+                    "Float.of_int expects Int, got {}",
+                    show(&other)
+                ))),
+            })),
+            ("to_string".into(), builtin1(|v| match v {
+                Value::Float(f) => Ok(Value::Str(format!("{f}"))),
+                other => Err(RuntimeError::new(format!(
+                    "Float.to_string expects Float, got {}",
+                    show(&other)
+                ))),
+            })),
+        ]),
+    );
+    env = env.extend(
+        "Int".into(),
+        Value::Record(vec![
+            ("of_float".into(), builtin1(|v| match v {
+                Value::Float(f) => Ok(Value::Int(f as i64)),
+                other => Err(RuntimeError::new(format!(
+                    "Int.of_float expects Float, got {}",
+                    show(&other)
+                ))),
+            })),
+            ("to_string".into(), builtin1(|v| match v {
+                Value::Int(n) => Ok(Value::Str(n.to_string())),
+                other => Err(RuntimeError::new(format!(
+                    "Int.to_string expects Int, got {}",
+                    show(&other)
+                ))),
+            })),
+        ]),
+    );
+    env = env.extend(
+        "String".into(),
+        Value::Record(vec![
+            ("length".into(), builtin1(|v| match v {
+                Value::Str(s) => Ok(Value::Int(s.chars().count() as i64)),
+                other => Err(RuntimeError::new(format!(
+                    "String.length expects String, got {}",
+                    show(&other)
+                ))),
+            })),
+            ("concat".into(), builtin1(|v| match v {
+                Value::Series(vs) => {
+                    let mut out = String::new();
+                    for x in vs {
+                        match x {
+                            Value::Str(s) => out.push_str(&s),
+                            other => {
+                                return Err(RuntimeError::new(format!(
+                                    "String.concat expects [String], got element {}",
+                                    show(&other)
+                                )));
+                            }
+                        }
+                    }
+                    Ok(Value::Str(out))
+                }
+                other => Err(RuntimeError::new(format!(
+                    "String.concat expects [String], got {}",
+                    show(&other)
+                ))),
+            })),
+        ]),
+    );
+    env = env.extend(
+        "Option".into(),
+        Value::Record(vec![("unwrap".into(), builtin1(|v| match v {
+            Value::Cons(n, args) if n == "Some" && args.len() == 1 => Ok(args[0].clone()),
+            Value::Cons(n, _) if n == "None" => {
+                Err(RuntimeError::new("Option.unwrap on None"))
+            }
+            other => Err(RuntimeError::new(format!(
+                "Option.unwrap expects Option, got {}",
+                show(&other)
+            ))),
+        }))]),
+    );
+    env = env.extend(
+        "Result".into(),
+        Value::Record(vec![("unwrap".into(), builtin1(|v| match v {
+            Value::Cons(n, args) if n == "Ok" && args.len() == 1 => Ok(args[0].clone()),
+            Value::Cons(n, args) if n == "Err" && args.len() == 1 => {
+                Err(RuntimeError::new(format!(
+                    "Result.unwrap on Err: {}",
+                    show(&args[0])
+                )))
+            }
+            other => Err(RuntimeError::new(format!(
+                "Result.unwrap expects Result, got {}",
+                show(&other)
+            ))),
+        }))]),
+    );
     env
+}
+
+fn builtin1(f: impl Fn(Value) -> Result<Value, RuntimeError> + 'static) -> Value {
+    Value::Builtin(BuiltinFn(Rc::new(f)))
+}
+
+fn sum_series(xs: Value) -> Result<Value, RuntimeError> {
+    match xs {
+        Value::Series(vs) => {
+            if vs.is_empty() {
+                return Ok(Value::Int(0));
+            }
+            if matches!(vs[0], Value::Float(_)) {
+                let mut acc = 0.0;
+                for v in vs {
+                    match v {
+                        Value::Float(f) => acc += f,
+                        other => return Err(RuntimeError::new(format!(
+                            "sum: mixed types, got {}",
+                            show(&other)
+                        ))),
+                    }
+                }
+                Ok(Value::Float(acc))
+            } else {
+                let mut acc: i64 = 0;
+                for v in vs {
+                    match v {
+                        Value::Int(n) => acc += n,
+                        other => return Err(RuntimeError::new(format!(
+                            "sum: mixed types, got {}",
+                            show(&other)
+                        ))),
+                    }
+                }
+                Ok(Value::Int(acc))
+            }
+        }
+        other => Err(RuntimeError::new(format!(
+            "sum expects a series, got {}",
+            show(&other)
+        ))),
+    }
+}
+
+fn mean_series(xs: Value) -> Result<Value, RuntimeError> {
+    let Value::Series(vs) = xs else {
+        return Err(RuntimeError::new("mean expects a series"));
+    };
+    if vs.is_empty() {
+        return Err(RuntimeError::new("mean of empty series"));
+    }
+    let n = vs.len() as f64;
+    let mut acc = 0.0;
+    for v in vs {
+        match v {
+            Value::Float(f) => acc += f,
+            Value::Int(i) => acc += i as f64,
+            other => return Err(RuntimeError::new(format!(
+                "mean expects numeric series, got {}",
+                show(&other)
+            ))),
+        }
+    }
+    Ok(Value::Float(acc / n))
+}
+
+fn extremum_series(xs: Value, take_min: bool) -> Result<Value, RuntimeError> {
+    let Value::Series(vs) = xs else {
+        return Err(RuntimeError::new("min/max expects a series"));
+    };
+    if vs.is_empty() {
+        return Err(RuntimeError::new("min/max of empty series"));
+    }
+    let mut best: f64 = match &vs[0] {
+        Value::Float(f) => *f,
+        Value::Int(i) => *i as f64,
+        other => return Err(RuntimeError::new(format!(
+            "min/max expects numeric, got {}",
+            show(other)
+        ))),
+    };
+    for v in &vs[1..] {
+        let n = match v {
+            Value::Float(f) => *f,
+            Value::Int(i) => *i as f64,
+            other => return Err(RuntimeError::new(format!(
+                "min/max expects numeric, got {}",
+                show(other)
+            ))),
+        };
+        if (take_min && n < best) || (!take_min && n > best) {
+            best = n;
+        }
+    }
+    Ok(Value::Float(best))
+}
+
+fn std_series(xs: Value) -> Result<Value, RuntimeError> {
+    let Value::Series(vs) = xs.clone() else {
+        return Err(RuntimeError::new("std expects a series"));
+    };
+    if vs.len() < 2 {
+        return Err(RuntimeError::new("std requires at least 2 elements"));
+    }
+    let Value::Float(mu) = mean_series(xs)? else {
+        unreachable!()
+    };
+    let n = vs.len() as f64;
+    let mut acc = 0.0;
+    for v in vs {
+        let x = match v {
+            Value::Float(f) => f,
+            Value::Int(i) => i as f64,
+            other => return Err(RuntimeError::new(format!(
+                "std expects numeric, got {}",
+                show(&other)
+            ))),
+        };
+        let d = x - mu;
+        acc += d * d;
+    }
+    Ok(Value::Float((acc / (n - 1.0)).sqrt()))
 }
 
 fn make_constructor(name: String, arity: usize) -> Value {
