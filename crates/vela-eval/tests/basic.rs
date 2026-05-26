@@ -108,6 +108,12 @@ fn let_rec_fibonacci() {
 }
 
 #[test]
+fn let_rec_mutual_even_odd() {
+    let src = "let rec is_even n = if n == 0 then true else is_odd (n - 1)\nand is_odd n = if n == 0 then false else is_even (n - 1)\nis_even 10";
+    assert_eq!(r(src), Value::Bool(true));
+}
+
+#[test]
 fn non_recursive_let_shadows_outer() {
     let src = "let x = 1\nlet x = x + 1\nx";
     assert_eq!(r(src), Value::Int(2));

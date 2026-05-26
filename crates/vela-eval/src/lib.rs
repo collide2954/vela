@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use vela_parser::{
-    BinOp, Expr, ListPart, Lit, Param, Pat, Stmt, TypeDeclBody, UnOp, parse_program,
+    BinOp, Expr, LetBinding, ListPart, Lit, Param, Pat, Stmt, TypeDeclBody, UnOp, parse_program,
 };
 
 #[derive(Debug, Clone)]
@@ -265,6 +265,16 @@ fn eval_stmt(stmt: &Stmt, env: &mut Env) -> Result<Value, RuntimeError> {
             }
             Ok(Value::Unit)
         }
+        Stmt::LetRecGroup(bindings) => {
+            for b in bindings {
+                *env = env.extend(b.name.clone(), Value::Unit);
+            }
+            for b in bindings {
+                let value = make_rec_value(b, env)?;
+                env.mutate(&b.name, value);
+            }
+            Ok(Value::Unit)
+        }
         Stmt::Var { name, body, .. } => {
             let value = eval(body, env)?;
             *env = env.extend(name.clone(), value);
@@ -423,6 +433,14 @@ fn match_pat(pat: &Pat, value: &Value) -> Option<Vec<(String, Value)>> {
             Some(bs)
         }
         _ => None,
+    }
+}
+
+fn make_rec_value(b: &LetBinding, env: &Env) -> Result<Value, RuntimeError> {
+    if b.params.is_empty() {
+        eval(&b.body, env)
+    } else {
+        Ok(make_closure(&b.params, &b.body, env))
     }
 }
 

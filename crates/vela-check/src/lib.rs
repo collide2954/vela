@@ -740,6 +740,62 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             *env = env.extend(name.clone(), scheme);
             Ok(Type::Unit)
         }
+        Stmt::LetRecGroup(bindings) => {
+            let mut inner_env = env.clone();
+            let mut placeholders = Vec::with_capacity(bindings.len());
+            for b in bindings {
+                let placeholder = ctx.fresh_var();
+                placeholders.push(placeholder.clone());
+                inner_env = inner_env.extend(b.name.clone(), Scheme::mono(placeholder));
+            }
+            let mut binding_types = Vec::with_capacity(bindings.len());
+            for (b, placeholder) in bindings.iter().zip(placeholders.iter()) {
+                let mut translator = TyTranslator::new();
+                let mut body_env = inner_env.clone();
+                let mut param_types = Vec::with_capacity(b.params.len());
+                for p in &b.params {
+                    let pt = match &p.ty {
+                        Some(ty) => translator.translate(ty, ctx)?,
+                        None => ctx.fresh_var(),
+                    };
+                    let (pat_ty, pat_bindings) = infer_pat(&p.pat, &body_env, ctx)?;
+                    ctx.unify(&pt, &pat_ty)?;
+                    for (n, t) in pat_bindings {
+                        body_env = body_env.extend(n, Scheme::mono(t));
+                    }
+                    param_types.push(pt);
+                }
+                let body_ty = if b.params.is_empty() {
+                    infer(&b.body, &body_env, ctx)?
+                } else {
+                    let return_var = match &b.return_ty {
+                        Some(rt) => translator.translate(rt, ctx)?,
+                        None => ctx.fresh_var(),
+                    };
+                    let saved = ctx.enter_function(return_var.clone());
+                    let bt = infer(&b.body, &body_env, ctx)?;
+                    ctx.unify(&return_var, &bt)?;
+                    ctx.exit_function(saved);
+                    ctx.resolve(&return_var)
+                };
+                if b.params.is_empty()
+                    && let Some(rt) = &b.return_ty
+                {
+                    let rt_translated = translator.translate(rt, ctx)?;
+                    ctx.unify(&body_ty, &rt_translated)?;
+                }
+                let ty = param_types.into_iter().rev().fold(body_ty, |acc, pt| {
+                    Type::Fn(Box::new(pt), Box::new(acc))
+                });
+                ctx.unify(placeholder, &ty)?;
+                binding_types.push(ty);
+            }
+            for (b, ty) in bindings.iter().zip(binding_types.iter()) {
+                let scheme = ctx.generalize(env, ty);
+                *env = env.extend(b.name.clone(), scheme);
+            }
+            Ok(Type::Unit)
+        }
         Stmt::Var { name, ty, body } => {
             let body_ty = infer(body, env, ctx)?;
             if let Some(annotation) = ty {

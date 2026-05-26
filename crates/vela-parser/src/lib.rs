@@ -17,6 +17,7 @@ pub enum Stmt {
         body: Expr,
         recursive: bool,
     },
+    LetRecGroup(Vec<LetBinding>),
     Var { name: String, ty: Option<Ty>, body: Expr },
     Mutate { name: String, body: Expr },
     For { binding: String, iter: Expr, body: Expr },
@@ -61,6 +62,14 @@ pub struct ImplBlock {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImplMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub return_ty: Option<Ty>,
+    pub body: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LetBinding {
     pub name: String,
     pub params: Vec<Param>,
     pub return_ty: Option<Ty>,
@@ -346,47 +355,24 @@ impl Parser {
                     let body = self.parse_body_after_block_intro()?;
                     return Ok(Stmt::Destructure { pat, body });
                 }
-                let name = self.expect_ident()?;
-                let mut params = Vec::new();
-                loop {
-                    match self.peek() {
-                        Some(TokenKind::Ident(_)) => {
-                            let n = self.expect_ident()?;
-                            params.push(Param { pat: Pat::Var(n), ty: None });
-                        }
-                        Some(TokenKind::Punct(Punct::LParen)) => {
-                            let save = self.pos;
-                            self.bump();
-                            if let Some(p) = self.try_typed_param() {
-                                params.push(p);
-                            } else {
-                                self.pos = save;
-                                if let Some(p) = self.try_pattern_param() {
-                                    params.push(p);
-                                } else {
-                                    break;
-                                }
-                            }
-                        }
-                        Some(TokenKind::Punct(Punct::LBrace)) => {
-                            if let Some(p) = self.try_pattern_param() {
-                                params.push(p);
-                            } else {
-                                break;
-                            }
-                        }
-                        _ => break,
+                let first = self.parse_let_binding_tail()?;
+                if recursive && self.peek_after_newlines_is(&TokenKind::Keyword(Keyword::And)) {
+                    let mut bindings = vec![first];
+                    while self.peek_after_newlines_is(&TokenKind::Keyword(Keyword::And)) {
+                        self.skip_newlines();
+                        self.bump();
+                        bindings.push(self.parse_let_binding_tail()?);
                     }
-                }
-                let return_ty = if matches!(self.peek(), Some(TokenKind::Punct(Punct::Colon))) {
-                    self.bump();
-                    Some(self.parse_type()?)
+                    Ok(Stmt::LetRecGroup(bindings))
                 } else {
-                    None
-                };
-                self.expect(&TokenKind::Op(Op::Assign))?;
-                let body = self.parse_body_after_block_intro()?;
-                Ok(Stmt::Let { name, params, return_ty, body, recursive })
+                    Ok(Stmt::Let {
+                        name: first.name,
+                        params: first.params,
+                        return_ty: first.return_ty,
+                        body: first.body,
+                        recursive,
+                    })
+                }
             }
             Some(TokenKind::Keyword(Keyword::Var)) => {
                 self.bump();
@@ -877,6 +863,61 @@ impl Parser {
             }
         }
         Ok(fields)
+    }
+
+    fn parse_let_binding_tail(&mut self) -> Result<LetBinding, ParseError> {
+        let name = self.expect_ident()?;
+        let mut params = Vec::new();
+        loop {
+            match self.peek() {
+                Some(TokenKind::Ident(_)) => {
+                    let n = self.expect_ident()?;
+                    params.push(Param { pat: Pat::Var(n), ty: None });
+                }
+                Some(TokenKind::Punct(Punct::LParen)) => {
+                    let save = self.pos;
+                    self.bump();
+                    if let Some(p) = self.try_typed_param() {
+                        params.push(p);
+                    } else {
+                        self.pos = save;
+                        if let Some(p) = self.try_pattern_param() {
+                            params.push(p);
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                Some(TokenKind::Punct(Punct::LBrace)) => {
+                    if let Some(p) = self.try_pattern_param() {
+                        params.push(p);
+                    } else {
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+        let return_ty = if matches!(self.peek(), Some(TokenKind::Punct(Punct::Colon))) {
+            self.bump();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+        self.expect(&TokenKind::Op(Op::Assign))?;
+        let body = self.parse_body_after_block_intro()?;
+        Ok(LetBinding { name, params, return_ty, body })
+    }
+
+    fn peek_after_newlines_is(&self, target: &TokenKind) -> bool {
+        let mut i = self.pos;
+        while let Some(tok) = self.tokens.get(i) {
+            match &tok.kind {
+                TokenKind::Newline => i += 1,
+                other => return other == target,
+            }
+        }
+        false
     }
 
     fn parse_body_after_block_intro(&mut self) -> Result<Expr, ParseError> {
