@@ -11,7 +11,12 @@ fn main() -> ExitCode {
         println!();
         println!("usage: vela <subcommand> [args]");
         println!("subcommands:");
-        println!("  check FILE   type-check a single .vela file");
+        println!("  run FILE        execute a .vela file");
+        println!("  check FILE      type-check a single .vela file");
+        println!("  test FILE       run tests in a .vela file");
+        println!("  fmt FILE...     format files in place");
+        println!("  fmt --check     check formatting without modifying");
+        println!("  explain CODE    show the long form of a diagnostic");
         return ExitCode::SUCCESS;
     };
 
@@ -58,6 +63,7 @@ fn main() -> ExitCode {
             };
             test_one(path, &source)
         }
+        "fmt" => fmt_cmd(&args[2..]),
         "explain" => {
             let Some(code) = args.get(2) else {
                 eprintln!("usage: vela explain CODE");
@@ -220,5 +226,62 @@ fn check_one(path: &str, source: &str) -> ExitCode {
             eprint!("{}", diag.render(source));
             ExitCode::from(1)
         }
+    }
+}
+
+fn fmt_cmd(args: &[String]) -> ExitCode {
+    let mut check_only = false;
+    let mut files: Vec<String> = Vec::new();
+    for a in args {
+        match a.as_str() {
+            "--check" => check_only = true,
+            other if other.starts_with("--") => {
+                eprintln!("unknown flag: {other}");
+                return ExitCode::from(2);
+            }
+            other => files.push(other.into()),
+        }
+    }
+    if files.is_empty() {
+        eprintln!("usage: vela fmt [--check] FILE...");
+        return ExitCode::from(2);
+    }
+    let mut had_diff = false;
+    let mut had_error = false;
+    for path in &files {
+        let source = match fs::read_to_string(path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("cannot read {path}: {e}");
+                had_error = true;
+                continue;
+            }
+        };
+        let formatted = match vela_fmt::format_source(&source) {
+            Ok(s) => s,
+            Err(msg) => {
+                let diag = Diagnostic::error(msg).with_path(path).with_code("E0001");
+                eprint!("{}", diag.render(&source));
+                had_error = true;
+                continue;
+            }
+        };
+        if formatted == source {
+            continue;
+        }
+        if check_only {
+            println!("would reformat: {path}");
+            had_diff = true;
+        } else if let Err(e) = fs::write(path, &formatted) {
+            eprintln!("cannot write {path}: {e}");
+            had_error = true;
+        }
+    }
+    if had_error {
+        ExitCode::from(1)
+    } else if check_only && had_diff {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
     }
 }

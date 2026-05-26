@@ -17,6 +17,7 @@ dependencies = [
  "vela-check",
  "vela-diag",
  "vela-eval",
+ "vela-fmt",
  "vela-parser",
 ]
 
@@ -26,6 +27,13 @@ version = "0.1.0"
 
 [[package]]
 name = "vela-eval"
+version = "0.1.0"
+dependencies = [
+ "vela-parser",
+]
+
+[[package]]
+name = "vela-fmt"
 version = "0.1.0"
 dependencies = [
  "vela-parser",
