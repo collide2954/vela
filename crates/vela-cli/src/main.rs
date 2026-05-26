@@ -54,6 +54,7 @@ fn main() -> ExitCode {
             test_one(path, &source)
         }
         "fmt" => fmt_cmd(&args[2..]),
+        "new" => new_cmd(&args[2..]),
         "explain" => {
             let Some(code) = args.get(2) else {
                 eprintln!("usage: vela explain CODE");
@@ -174,7 +175,9 @@ fn run_one(path: &str, source: &str) -> ExitCode {
     }
     match vela_eval::run(source) {
         Ok(v) => {
-            println!("{}", vela_eval::show(&v));
+            if !matches!(v, vela_eval::Value::Unit) {
+                println!("{}", vela_eval::show(&v));
+            }
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -278,4 +281,52 @@ fn fmt_cmd(args: &[String]) -> ExitCode {
 
 fn repl() -> ExitCode {
     ExitCode::from(vela_repl::run() as u8)
+}
+
+fn new_cmd(args: &[String]) -> ExitCode {
+    let mut kind = vela_pkg::Kind::Bin;
+    let mut name: Option<String> = None;
+    for a in args {
+        match a.as_str() {
+            "--lib" => kind = vela_pkg::Kind::Lib,
+            "--bin" => kind = vela_pkg::Kind::Bin,
+            other if other.starts_with("--") => {
+                eprintln!("unknown flag: {other}");
+                return ExitCode::from(2);
+            }
+            other if name.is_none() => name = Some(other.into()),
+            other => {
+                eprintln!("unexpected argument: {other}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let Some(name) = name else {
+        eprintln!("usage: vela new [--lib|--bin] NAME");
+        return ExitCode::from(2);
+    };
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("cannot read cwd: {e}");
+            return ExitCode::from(1);
+        }
+    };
+    match vela_pkg::new_project(&cwd, &name, kind) {
+        Ok(dir) => {
+            println!(
+                "created {} ({})",
+                dir.display(),
+                match kind {
+                    vela_pkg::Kind::Bin => "binary",
+                    vela_pkg::Kind::Lib => "library",
+                }
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::from(1)
+        }
+    }
 }

@@ -16,6 +16,7 @@ vela-diag   = { path = "../vela-diag" }
 vela-eval   = { path = "../vela-eval" }
 vela-fmt    = { path = "../vela-fmt" }
 vela-parser = { path = "../vela-parser" }
+vela-pkg    = { path = "../vela-pkg" }
 vela-repl   = { path = "../vela-repl" }
 
 [lints]
