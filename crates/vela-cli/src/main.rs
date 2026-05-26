@@ -44,6 +44,20 @@ fn main() -> ExitCode {
             };
             run_one(path, &source)
         }
+        "test" => {
+            let Some(path) = args.get(2) else {
+                eprintln!("usage: vela test FILE");
+                return ExitCode::from(2);
+            };
+            let source = match fs::read_to_string(path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("cannot read {path}: {e}");
+                    return ExitCode::from(1);
+                }
+            };
+            test_one(path, &source)
+        }
         "explain" => {
             let Some(code) = args.get(2) else {
                 eprintln!("usage: vela explain CODE");
@@ -67,6 +81,52 @@ fn main() -> ExitCode {
         other => {
             eprintln!("unknown subcommand: {other}");
             ExitCode::from(2)
+        }
+    }
+}
+
+fn test_one(path: &str, source: &str) -> ExitCode {
+    match vela_parser::parse_program(source) {
+        Ok(_) => {}
+        Err(e) => {
+            let mut diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+            if let Some(span) = e.span {
+                diag = diag.with_span(span);
+            }
+            eprint!("{}", diag.render(source));
+            return ExitCode::from(1);
+        }
+    }
+    if let Err(e) = vela_check::check_program(source) {
+        let diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+        eprint!("{}", diag.render(source));
+        return ExitCode::from(1);
+    }
+    match vela_eval::run_tests(source) {
+        Ok(reports) => {
+            let total = reports.len();
+            let passed = reports.iter().filter(|r| r.passed).count();
+            for r in &reports {
+                if r.passed {
+                    println!("ok    {}", r.name);
+                } else {
+                    println!("fail  {}", r.name);
+                    if let Some(m) = &r.message {
+                        println!("      {m}");
+                    }
+                }
+            }
+            println!();
+            println!("{passed}/{total} tests passed");
+            if passed == total {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(1)
+            }
+        }
+        Err(e) => {
+            eprintln!("error: {}", e.message);
+            ExitCode::from(1)
         }
     }
 }

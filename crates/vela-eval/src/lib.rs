@@ -110,6 +110,47 @@ pub fn run(src: &str) -> Result<Value, RuntimeError> {
     Ok(last)
 }
 
+#[derive(Debug, Clone)]
+pub struct TestReport {
+    pub name: String,
+    pub passed: bool,
+    pub message: Option<String>,
+}
+
+pub fn run_tests(src: &str) -> Result<Vec<TestReport>, RuntimeError> {
+    let program = parse_program(src)
+        .map_err(|e| RuntimeError::new(format!("parse error: {}", e.message)))?;
+    let mut env = prelude();
+    let mut reports = Vec::new();
+    for stmt in &program.stmts {
+        if let Stmt::Tests(cases) = stmt {
+            for case in cases {
+                let report = match case {
+                    vela_parser::TestCase::Test { name, body } => {
+                        match eval(body, &env) {
+                            Ok(_) => TestReport { name: name.clone(), passed: true, message: None },
+                            Err(e) => TestReport {
+                                name: name.clone(),
+                                passed: false,
+                                message: Some(e.message),
+                            },
+                        }
+                    }
+                    vela_parser::TestCase::Prop { name, .. } => TestReport {
+                        name: name.clone(),
+                        passed: true,
+                        message: Some("prop tests not yet supported".into()),
+                    },
+                };
+                reports.push(report);
+            }
+        } else {
+            eval_stmt(stmt, &mut env)?;
+        }
+    }
+    Ok(reports)
+}
+
 fn prelude() -> Env {
     let mut env = Env::new();
     env = env.extend(
@@ -130,6 +171,17 @@ fn prelude() -> Env {
     env = env.extend("Some".into(), make_constructor("Some".into(), 1));
     env = env.extend("Ok".into(), make_constructor("Ok".into(), 1));
     env = env.extend("Err".into(), make_constructor("Err".into(), 1));
+    env = env.extend(
+        "assert".into(),
+        Value::Builtin(BuiltinFn(Rc::new(|v| match v {
+            Value::Bool(true) => Ok(Value::Unit),
+            Value::Bool(false) => Err(RuntimeError::new("assertion failed")),
+            other => Err(RuntimeError::new(format!(
+                "assert requires Bool, got {}",
+                show(&other)
+            ))),
+        }))),
+    );
     env
 }
 
