@@ -509,6 +509,19 @@ impl Session {
             std::mem::take(&mut self.ctx.warnings),
         ))
     }
+
+    pub fn type_of(&mut self, src: &str) -> Result<Type, TypeError> {
+        let expr =
+            parse_expr(src).map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
+        let t = infer(&expr, &self.env, &mut self.ctx)?;
+        Ok(self.ctx.resolve(&t))
+    }
+}
+
+impl Type {
+    pub fn display(&self) -> String {
+        self.show()
+    }
 }
 
 impl Default for Session {

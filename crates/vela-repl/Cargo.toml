@@ -10,6 +10,7 @@ repository   = { workspace = true }
 vela-check  = { path = "../vela-check" }
 vela-eval   = { path = "../vela-eval" }
 vela-parser = { path = "../vela-parser" }
+rustyline   = { version = "18", default-features = false, features = ["with-file-history"] }
 
 [lints]
 workspace = true
