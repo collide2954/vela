@@ -1,6 +1,6 @@
 # The Vela Language Specification
 
-Status: draft, version 0.4.
+Status: draft, version 0.5.
 Target: Vela 1.0.
 License: Apache-2.0.
 
@@ -134,8 +134,8 @@ Symbol literals begin with a colon and name a column or key:
 Boolean literals are `true` and `false`. The unit value is written
 `()`.
 
-Reserved words: `let`, `var`, `fn`, `if`, `then`, `else`, `match`,
-`with`, `when`, `type`, `trait`, `impl`, `for`, `in`, `return`,
+Reserved words: `let`, `rec`, `var`, `fn`, `if`, `then`, `else`,
+`match`, `with`, `when`, `type`, `trait`, `impl`, `for`, `in`,
 `pub`, `module`, `import`, `as`, `where`, `scope`, `spawn`,
 `extern`, `open`, `app`, `input`, `output`, `tests`, `test`,
 `prop`, `true`, `false`, `and`, `or`, `not`.
@@ -157,6 +157,20 @@ statement is not an expression (for example, ends in `let` or
 binding. The `<-` operator is the only way to mutate a `var`. Plain
 `=` is binding, never assignment.
 
+`let` is not recursive: the bound name is not in scope in its own
+right-hand side. To define a recursive function, use `let rec`:
+
+    let rec factorial n =
+        if n <= 1 then 1
+        else n * factorial (n - 1)
+
+Within a `let rec ... and ... and ...` block, every name is in
+scope in every right-hand side, enabling mutual recursion.
+
+Shadowing is permitted: a later `let x = ...` in the same scope
+rebinds `x`. The compiler emits a warning (`W0050`) on each
+shadowing binding; pass `--allow shadow` to silence it locally.
+
 ### 5.2 Functions
 
     let standardize xs =
@@ -172,6 +186,32 @@ disambiguate complex arguments.
 
 Functions are curried. `let add x y = x + y` has type
 `Int -> Int -> Int` and `add 1` is a function of one argument.
+
+Function parameters may be any irrefutable pattern. The common
+cases are an identifier, a typed identifier `(name : T)`, the unit
+pattern `()`, a tuple pattern, or a record pattern:
+
+    let dist (a, b) (c, d) = (c - a) + (d - b)
+    let area { width = w, height = h } = w * h
+    let thunk () = 42
+
+A refutable pattern (constructor or list pattern) is accepted as a
+parameter only when the parameter's type makes the match
+exhaustive. Otherwise the compiler emits an error.
+
+Both lambda bodies (`fn x -> body`) and `let f x = body` definitions
+accept a block body: a newline followed by an indented sequence of
+statements ending in an expression. The block's value is its
+trailing expression (section 5).
+
+    let f x =
+        let y = x + 1
+        let z = y * 2
+        z
+
+    let g = fn x ->
+        let y = x + 1
+        y * 2
 
 ### 5.3 Type annotations
 
@@ -192,7 +232,16 @@ extensions for multiple dispatch and row polymorphism on records.
     | Err _ -> 0.0
 
 `match` is exhaustive; non-exhaustive matches are a compile-time
-error. Patterns include:
+error. Exhaustiveness checking considers nested patterns: a match
+on `(Int, Option[Int])` requires arms that together cover
+`(_, None)` as well as `(_, Some _)`. Arms with guards do not
+contribute to coverage.
+
+Match arms accept the same block body syntax as functions: `| pat ->`
+followed by a newline and an indented block whose trailing
+expression is the arm's value.
+
+Patterns include:
 
 - Literals (`0`, `"abc"`, `true`).
 - Variable bindings (`x`) and the wildcard `_`.
@@ -282,6 +331,12 @@ an IO function for each element), Vela provides a `for` form:
     var total = 0
     for x in xs:
         total <- total + x
+
+The binding in `for binding in iter:` is an irrefutable pattern
+just like a function parameter, so destructuring is natural:
+
+    for (key, value) in pairs:
+        println (format "{} = {}" key value)
 
 `for` requires its body to evaluate to `()`; it is for side effects.
 Anything that returns a value should be expressed with `map`,
@@ -469,6 +524,19 @@ constructor (`Leaf`) is a value of that type; a constructor with
 arguments (`Circle Float`) is a function (`Float -> Shape`). Pattern
 matching uses the same constructors.
 
+A nominal record type is constructed by writing a bare record
+literal in a context where the nominal type is expected:
+
+    type Point = { x : Float, y : Float }
+
+    let p : Point = { x = 1.0, y = 2.0 }   # nominal Point
+    let q       = { x = 1.0, y = 2.0 }     # structural record
+
+The literal's fields must match the nominal type's fields exactly
+(no extras, no missing). A structural record literal in a position
+expecting `Point` is rewritten to the nominal `Point` at
+elaboration time and is otherwise distinct from `Point` thereafter.
+
 Parametric types are written with type-variable parameters:
 
     type Tree 'a =
@@ -635,14 +703,19 @@ Operations: `select`, `filter`, `mutate`, `group_by`, `summarize`,
 `Series[Option[T]]`; nullability is a property of the column, not a
 sentinel value, and maps directly onto Arrow's validity bitmap.
 
-Columns are accessed in two ways. When the column set is statically
-known, `df.x` returns the column `x` as `[Option[T]]`, type-checked
-at compile time via row polymorphism. When the schema is only known
-at runtime (a CSV with unknown columns, a query result), `df.col :x`
-returns `Result[[Option[T]], ColumnError]`.
+A DataFrame's type may be schema-erased (`DataFrame`) or carry a
+static row schema (`DataFrame[{ x : Float, y : Int }]`). When the
+schema is known, `df.x` is checked at compile time and returns the
+exact column type `[Option[T]]`. When the schema is erased, `df.x`
+returns `[Option['a]]` with `'a` left to inference; `df.col :x`
+returns `Result[[Option['a]], ColumnError]` for the runtime
+lookup.
 
-    let s : [Option[Float]] = df.x                # static
-    let s = df.col :x?                            # dynamic
+    let p : DataFrame[{ x : Float, y : Int }] = ...
+    let xs : [Option[Float]] = p.x                # static, checked
+
+    let q : DataFrame = read_csv "x.csv"?         # schema erased
+    let xs = q.col :x?                            # dynamic lookup
 
 Because columns are Arrow arrays in memory, every DataFrame can be
 handed to a Rust extension or an Arrow-aware runtime without copying.
@@ -771,7 +844,12 @@ description; this module is the API surface used by app authors.
 
 `print`, `println`, `eprint`, `eprintln`, and `format` consume any
 value implementing `Show` (see section 6.6) and produce text. The
-formatter syntax is positional with `{}` placeholders:
+formatter syntax is positional with `{}` placeholders only; each
+`{}` consumes the next argument and renders it via the argument's
+`Show` implementation. Width, precision, alignment, and indexed
+placeholders are not supported in 1.0; callers can build them
+explicitly with `Float.to_string`, `Int.to_string`, and string
+concatenation.
 
     format "x = {}, y = {}" x y
 
