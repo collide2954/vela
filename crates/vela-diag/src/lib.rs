@@ -41,6 +41,16 @@ impl Diagnostic {
         }
     }
 
+    pub fn warning(message: impl Into<String>) -> Self {
+        Self {
+            severity: Severity::Warning,
+            code: None,
+            message: message.into(),
+            primary: None,
+            source_path: "<unknown>".into(),
+        }
+    }
+
     pub fn with_code(mut self, code: impl Into<String>) -> Self {
         self.code = Some(code.into());
         self

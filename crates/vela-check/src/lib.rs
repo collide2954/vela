@@ -131,12 +131,19 @@ impl Env {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Warning {
+    pub code: &'static str,
+    pub message: String,
+}
+
 #[derive(Debug)]
 struct Ctx {
     subst: HashMap<u32, Type>,
     fresh: u32,
     sums: HashMap<String, Vec<String>>,
     expected_return: Option<Type>,
+    warnings: Vec<Warning>,
 }
 
 impl Default for Ctx {
@@ -145,11 +152,26 @@ impl Default for Ctx {
         sums.insert("Bool".into(), vec!["true".into(), "false".into()]);
         sums.insert("Option".into(), vec!["None".into(), "Some".into()]);
         sums.insert("Result".into(), vec!["Ok".into(), "Err".into()]);
-        Self { subst: HashMap::new(), fresh: 0, sums, expected_return: None }
+        Self {
+            subst: HashMap::new(),
+            fresh: 0,
+            sums,
+            expected_return: None,
+            warnings: Vec::new(),
+        }
     }
 }
 
 impl Ctx {
+    fn warn_shadowing(&mut self, env: &Env, name: &str) {
+        if env.lookup(name).is_some() {
+            self.warnings.push(Warning {
+                code: "W0050",
+                message: format!("`{name}` shadows an existing binding"),
+            });
+        }
+    }
+
     fn enter_function(&mut self, ret: Type) -> Option<Type> {
         self.expected_return.replace(ret)
     }
@@ -407,6 +429,10 @@ pub fn check_expr(src: &str) -> Result<Type, TypeError> {
 }
 
 pub fn check_program(src: &str) -> Result<Type, TypeError> {
+    check_program_with_warnings(src).map(|(t, _)| t)
+}
+
+pub fn check_program_with_warnings(src: &str) -> Result<(Type, Vec<Warning>), TypeError> {
     let program = parse_program(src)
         .map_err(|e| TypeError::new(format!("parse error: {}", e.message)))?;
     let mut ctx = Ctx::default();
@@ -415,7 +441,8 @@ pub fn check_program(src: &str) -> Result<Type, TypeError> {
     for stmt in &program.stmts {
         last = check_stmt(stmt, &mut env, &mut ctx)?;
     }
-    Ok(ctx.resolve(&last))
+    let resolved = ctx.resolve(&last);
+    Ok((resolved, ctx.warnings))
 }
 
 fn prelude(ctx: &mut Ctx) -> Env {
@@ -737,6 +764,7 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                 Type::Fn(Box::new(pt), Box::new(acc))
             });
             let scheme = ctx.generalize(env, &ty);
+            ctx.warn_shadowing(env, name);
             *env = env.extend(name.clone(), scheme);
             Ok(Type::Unit)
         }
@@ -792,6 +820,7 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
             }
             for (b, ty) in bindings.iter().zip(binding_types.iter()) {
                 let scheme = ctx.generalize(env, ty);
+                ctx.warn_shadowing(env, &b.name);
                 *env = env.extend(b.name.clone(), scheme);
             }
             Ok(Type::Unit)
@@ -804,6 +833,7 @@ fn check_stmt(stmt: &Stmt, env: &mut Env, ctx: &mut Ctx) -> Result<Type, TypeErr
                 ctx.unify(&body_ty, &annotation_ty)?;
             }
             let resolved = ctx.resolve(&body_ty);
+            ctx.warn_shadowing(env, name);
             *env = env.extend(name.clone(), Scheme::mono(resolved));
             Ok(Type::Unit)
         }

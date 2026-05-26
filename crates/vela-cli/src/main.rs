@@ -97,10 +97,18 @@ fn test_one(path: &str, source: &str) -> ExitCode {
             return ExitCode::from(1);
         }
     }
-    if let Err(e) = vela_check::check_program(source) {
-        let diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
-        eprint!("{}", diag.render(source));
-        return ExitCode::from(1);
+    match vela_check::check_program_with_warnings(source) {
+        Ok((_, warnings)) => {
+            for w in &warnings {
+                let diag = Diagnostic::warning(&w.message).with_path(path).with_code(w.code);
+                eprint!("{}", diag.render(source));
+            }
+        }
+        Err(e) => {
+            let diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+            eprint!("{}", diag.render(source));
+            return ExitCode::from(1);
+        }
     }
     match vela_eval::run_tests(source) {
         Ok(reports) => {
@@ -143,10 +151,18 @@ fn run_one(path: &str, source: &str) -> ExitCode {
             return ExitCode::from(1);
         }
     }
-    if let Err(e) = vela_check::check_program(source) {
-        let diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
-        eprint!("{}", diag.render(source));
-        return ExitCode::from(1);
+    match vela_check::check_program_with_warnings(source) {
+        Ok((_, warnings)) => {
+            for w in &warnings {
+                let diag = Diagnostic::warning(&w.message).with_path(path).with_code(w.code);
+                eprint!("{}", diag.render(source));
+            }
+        }
+        Err(e) => {
+            let diag = Diagnostic::error(e.message).with_path(path).with_code(e.code);
+            eprint!("{}", diag.render(source));
+            return ExitCode::from(1);
+        }
     }
     match vela_eval::run(source) {
         Ok(v) => {
@@ -174,8 +190,12 @@ fn check_one(path: &str, source: &str) -> ExitCode {
             return ExitCode::from(1);
         }
     }
-    match vela_check::check_program(source) {
-        Ok(_) => {
+    match vela_check::check_program_with_warnings(source) {
+        Ok((_, warnings)) => {
+            for w in &warnings {
+                let diag = Diagnostic::warning(&w.message).with_path(path).with_code(w.code);
+                eprint!("{}", diag.render(source));
+            }
             println!("ok");
             ExitCode::SUCCESS
         }
